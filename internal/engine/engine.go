@@ -83,3 +83,7 @@ func (e *Engine) Update(key, value []byte) error {
 	e.index[string(key)] = offset
 	return nil
 }
+
+func (e *Engine) Index() map[string]int64 {
+	return e.index
+}

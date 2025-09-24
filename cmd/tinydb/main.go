@@ -1,170 +1,314 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/your-username/mini-db-go/internal/engine"
 )
+
+// 🎨 ANSI colors
+const (
+	ColorReset  = "\033[0m"
+	ColorRed    = "\033[31m"
+	ColorGreen  = "\033[32m"
+	ColorYellow = "\033[33m"
+	ColorCyan   = "\033[36m"
+)
+
+var commands = []string{
+	"insertOne",
+	"findOne",
+	"updateOne",
+	"deleteOne",
+	"dumpAll",
+	"exit",
+}
 
 func main() {
 	db, err := engine.Open("data/tiny.db")
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("TinyDB CLI (Mongo-like)")
+	fmt.Println(ColorGreen + "TinyDB CLI (Mongo-like, history + arrow keys, autocomplete, colored)" + ColorReset)
 	fmt.Println("Commands:")
-	fmt.Println(` insertOne <collection> {"_id":"1","field":"value"}`)
-	fmt.Println(` findOne <collection> {"_id":"1"}`)
-	fmt.Println(` updateOne <collection> {"_id":"1"} {"$set":{"field":"new"}}`)
-	fmt.Println(` deleteOne <collection> {"_id":"1"}`)
-	fmt.Println(" exit")
+	fmt.Println(ColorCyan + " insertOne, findOne, updateOne, deleteOne, dumpAll, exit" + ColorReset)
 
-	scanner := bufio.NewScanner(os.Stdin)
+	// ✅ autocomplete config
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          ColorYellow + "> " + ColorReset,
+		HistoryFile:     "/tmp/tinydb.history",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+		AutoComplete:    completer{},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rl.Close()
+
 	for {
-		fmt.Print("> ")
-		if !scanner.Scan() {
+		line, err := rl.Readline()
+		if err != nil {
 			break
 		}
-		line := strings.TrimSpace(scanner.Text())
+		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
 
-		parts := strings.Fields(line)
-		cmd := strings.ToLower(parts[0])
+		handleCommand(db, line)
+	}
+}
 
-		switch cmd {
-		case "insertone":
-			if len(parts) < 3 {
-				fmt.Println("Usage: insertOne <collection> <jsonDoc>")
-				continue
-			}
-			collection := parts[1]
-			docRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
+// ✅ AutoCompleter cho CLI
+type completer struct{}
 
-			var doc map[string]interface{}
-			if err := json.Unmarshal([]byte(docRaw), &doc); err != nil {
-				fmt.Println("Invalid JSON:", err)
-				continue
-			}
-			id, ok := doc["_id"].(string)
-			if !ok {
-				fmt.Println("Document must have string _id field")
-				continue
-			}
-			if err := db.Put([]byte(collection+":"+id), []byte(docRaw)); err != nil {
-				fmt.Println("Error:", err)
+func (c completer) Do(line []rune, pos int) ([][]rune, int) {
+	word := string(line)
+	suggestions := [][]rune{}
+	for _, cmd := range commands {
+		if strings.HasPrefix(strings.ToLower(cmd), strings.ToLower(word)) {
+			suggestions = append(suggestions, []rune(cmd))
+		}
+	}
+	return suggestions, 0
+}
+
+// ✅ xử lý command
+func handleCommand(db *engine.Engine, line string) {
+	parts := strings.Fields(line)
+	if len(parts) == 0 {
+		return
+	}
+	cmd := strings.ToLower(parts[0])
+
+	switch cmd {
+	case "insertone":
+		if len(parts) < 3 {
+			fmt.Println(ColorRed + "Usage: insertOne <collection> <jsonDoc>" + ColorReset)
+			return
+		}
+		collection := parts[1]
+		docRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
+
+		var doc map[string]interface{}
+		if err := json.Unmarshal([]byte(docRaw), &doc); err != nil {
+			fmt.Println(ColorRed+"Invalid JSON:"+ColorReset, err)
+			return
+		}
+		id, ok := doc["_id"].(string)
+		if !ok {
+			fmt.Println(ColorRed + "Document must have string _id field" + ColorReset)
+			return
+		}
+		if err := db.Put([]byte(collection+":"+id), []byte(docRaw)); err != nil {
+			fmt.Println(ColorRed+"Error:"+ColorReset, err)
+		} else {
+			fmt.Println(ColorGreen+"Inserted"+ColorReset,
+				ColorYellow+collection+ColorReset,
+				ColorCyan+id+ColorReset)
+		}
+
+	case "findone":
+		if len(parts) < 3 {
+			fmt.Println(ColorRed + "Usage: findOne <collection> <jsonQuery>" + ColorReset)
+			return
+		}
+		collection := parts[1]
+		queryRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
+
+		var query map[string]interface{}
+		if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
+			fmt.Println(ColorRed+"Invalid JSON:"+ColorReset, err)
+			return
+		}
+		id, ok := query["_id"].(string)
+		if !ok {
+			fmt.Println(ColorRed + "Query must have string _id" + ColorReset)
+			return
+		}
+		val, err := db.Get([]byte(collection + ":" + id))
+		if err != nil {
+			fmt.Println(ColorRed+"Error:"+ColorReset, err)
+		} else {
+			var pretty map[string]interface{}
+			if err := json.Unmarshal(val, &pretty); err == nil {
+				b, _ := json.MarshalIndent(pretty, "", "  ")
+				fmt.Println(ColorCyan + string(b) + ColorReset)
 			} else {
-				fmt.Println("Inserted", collection, id)
+				fmt.Println(ColorCyan + string(val) + ColorReset)
 			}
+		}
 
-		case "findone":
-			if len(parts) < 3 {
-				fmt.Println("Usage: findOne <collection> <jsonQuery>")
-				continue
-			}
-			collection := parts[1]
-			queryRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
+	case "updateone":
+		args := strings.SplitN(line, " ", 4)
+		if len(args) < 4 {
+			fmt.Println(ColorRed + "Usage: updateOne <collection> <jsonQuery> <jsonUpdate>" + ColorReset)
+			return
+		}
+		collection := args[1]
+		queryRaw := args[2]
+		updateRaw := args[3]
 
-			var query map[string]interface{}
-			if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-				fmt.Println("Invalid JSON:", err)
-				continue
-			}
-			id, ok := query["_id"].(string)
-			if !ok {
-				fmt.Println("Query must have string _id")
-				continue
-			}
-			val, err := db.Get([]byte(collection + ":" + id))
-			if err != nil {
-				fmt.Println("Error:", err)
-			} else {
-				fmt.Println(string(val))
-			}
+		var query map[string]interface{}
+		if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
+			fmt.Println(ColorRed+"Invalid JSON query:"+ColorReset, err)
+			return
+		}
+		id, ok := query["_id"].(string)
+		if !ok {
+			fmt.Println(ColorRed + "Query must have string _id" + ColorReset)
+			return
+		}
 
-		case "updateone":
-			args := strings.SplitN(line, " ", 4)
-			if len(args) < 4 {
-				fmt.Println("Usage: updateOne <collection> <jsonQuery> <jsonUpdate>")
-				continue
-			}
-			collection := args[1]
-			queryRaw := args[2]
-			updateRaw := args[3]
+		oldVal, err := db.Get([]byte(collection + ":" + id))
+		if err != nil {
+			fmt.Println(ColorRed+"Error:"+ColorReset, err)
+			return
+		}
+		var doc map[string]interface{}
+		_ = json.Unmarshal(oldVal, &doc)
 
-			var query map[string]interface{}
-			if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-				fmt.Println("Invalid JSON query:", err)
-				continue
+		var update map[string]map[string]interface{}
+		if err := json.Unmarshal([]byte(updateRaw), &update); err != nil {
+			fmt.Println(ColorRed+"Invalid JSON update:"+ColorReset, err)
+			return
+		}
+		if setFields, ok := update["$set"]; ok {
+			for k, v := range setFields {
+				doc[k] = v
 			}
-			id, ok := query["_id"].(string)
-			if !ok {
-				fmt.Println("Query must have string _id")
-				continue
-			}
+		}
 
-			oldVal, err := db.Get([]byte(collection + ":" + id))
-			if err != nil {
-				fmt.Println("Error:", err)
-				continue
-			}
-			var doc map[string]interface{}
-			_ = json.Unmarshal(oldVal, &doc)
+		newDoc, _ := json.Marshal(doc)
+		if err := db.Update([]byte(collection+":"+id), newDoc); err != nil {
+			fmt.Println(ColorRed+"Error:"+ColorReset, err)
+		} else {
+			fmt.Println(ColorGreen+"Updated"+ColorReset,
+				ColorYellow+collection+ColorReset,
+				ColorCyan+id+ColorReset)
+		}
 
-			var update map[string]map[string]interface{}
-			if err := json.Unmarshal([]byte(updateRaw), &update); err != nil {
-				fmt.Println("Invalid JSON update:", err)
-				continue
-			}
-			if setFields, ok := update["$set"]; ok {
-				for k, v := range setFields {
-					doc[k] = v
+	case "deleteone":
+		if len(parts) < 3 {
+			fmt.Println(ColorRed + "Usage: deleteOne <collection> <jsonQuery>" + ColorReset)
+			return
+		}
+		collection := parts[1]
+		queryRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
+
+		var query map[string]interface{}
+		if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
+			fmt.Println(ColorRed+"Invalid JSON:"+ColorReset, err)
+			return
+		}
+		id, ok := query["_id"].(string)
+		if !ok {
+			fmt.Println(ColorRed + "Query must have string _id" + ColorReset)
+			return
+		}
+		if err := db.Delete([]byte(collection + ":" + id)); err != nil {
+			fmt.Println(ColorRed+"Error:"+ColorReset, err)
+		} else {
+			fmt.Println(ColorGreen+"Deleted"+ColorReset,
+				ColorYellow+collection+ColorReset,
+				ColorCyan+id+ColorReset)
+		}
+
+	case "findmany":
+		if len(parts) < 3 {
+			fmt.Println(ColorRed + "Usage: findMany <collection> <jsonQuery>" + ColorReset)
+			return
+		}
+		collection := parts[1]
+		queryRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
+
+		var query map[string]interface{}
+		if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
+			fmt.Println(ColorRed+"Invalid JSON query:"+ColorReset, err)
+			return
+		}
+
+		results := []map[string]interface{}{}
+		for key := range db.Index() {
+			if strings.HasPrefix(key, collection+":") {
+				val, err := db.Get([]byte(key))
+				if err != nil {
+					continue
+				}
+				var doc map[string]interface{}
+				if err := json.Unmarshal(val, &doc); err != nil {
+					continue
+				}
+
+				// match query (tất cả field trong query phải khớp)
+				match := true
+				for k, v := range query {
+					if doc[k] != v {
+						match = false
+						break
+					}
+				}
+				if match {
+					results = append(results, doc)
 				}
 			}
-
-			newDoc, _ := json.Marshal(doc)
-			if err := db.Update([]byte(collection+":"+id), newDoc); err != nil {
-				fmt.Println("Error:", err)
-			} else {
-				fmt.Println("Updated", collection, id)
-			}
-
-		case "deleteone":
-			if len(parts) < 3 {
-				fmt.Println("Usage: deleteOne <collection> <jsonQuery>")
-				continue
-			}
-			collection := parts[1]
-			queryRaw := strings.TrimSpace(line[len(cmd)+len(collection)+2:])
-
-			var query map[string]interface{}
-			if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-				fmt.Println("Invalid JSON:", err)
-				continue
-			}
-			id, ok := query["_id"].(string)
-			if !ok {
-				fmt.Println("Query must have string _id")
-				continue
-			}
-			if err := db.Delete([]byte(collection + ":" + id)); err != nil {
-				fmt.Println("Error:", err)
-			} else {
-				fmt.Println("Deleted", collection, id)
-			}
-
-		case "exit", "quit":
-			fmt.Println("Bye!")
-			return
-
-		default:
-			fmt.Println("Unknown command:", cmd)
 		}
+
+		if len(results) == 0 {
+			fmt.Println(ColorYellow + "No documents found" + ColorReset)
+		} else {
+			data, _ := json.MarshalIndent(results, "", "  ")
+			fmt.Println(ColorCyan + string(data) + ColorReset)
+		}
+
+	case "dumpall":
+		if len(parts) < 2 {
+			fmt.Println(ColorRed + "Usage: dumpAll <collection>" + ColorReset)
+			return
+		}
+		collection := parts[1]
+		results := []map[string]interface{}{}
+		for key := range db.Index() {
+			if strings.HasPrefix(key, collection+":") {
+				val, err := db.Get([]byte(key))
+				if err != nil {
+					continue
+				}
+				var doc map[string]interface{}
+				if err := json.Unmarshal(val, &doc); err == nil {
+					results = append(results, doc)
+				}
+			}
+		}
+
+		// ✅ export theo format: collection_dump_hh:MM_dd_mm_yyyy.json
+		now := time.Now()
+		fileName := fmt.Sprintf("%s_dump_%02d-%02d_%02d-%02d-%04d.json",
+			collection,
+			now.Hour(), now.Minute(),
+			now.Day(), now.Month(), now.Year(),
+		)
+
+		data, _ := json.MarshalIndent(results, "", "  ")
+		if err := ioutil.WriteFile(fileName, data, 0644); err != nil {
+			fmt.Println(ColorRed+"Error writing "+fileName+":"+ColorReset, err)
+		} else {
+			fmt.Println(ColorGreen + "Exported to " + fileName + ColorReset)
+		}
+
+	case "exit", "quit":
+		fmt.Println(ColorYellow + "Bye!" + ColorReset)
+		os.Exit(0)
+
+	default:
+		fmt.Println(ColorRed+"Unknown command:"+ColorReset, cmd)
 	}
 }

@@ -1,0 +1,17 @@
+[
+  {
+    "_id": "c3",
+    "group": "normal",
+    "name": "Eve"
+  },
+  {
+    "_id": "c1",
+    "group": "vip",
+    "name": "Alice"
+  },
+  {
+    "_id": "c2",
+    "group": "vip",
+    "name": "Bob"
+  }
+]
