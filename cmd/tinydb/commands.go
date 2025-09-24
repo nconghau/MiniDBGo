@@ -31,6 +31,12 @@ func HandleCommand(db *engine.Engine, line string) {
 		handleDeleteOne(db, line, parts)
 	case "dumpall":
 		handleDumpAll(db, parts)
+	case "dumpdb":
+		handleDumpDB(db, parts)
+	case "restoredb":
+		handleRestoreDB(db, parts)
+	case "compact":
+		handleCompact(db)
 	case "exit", "quit":
 		fmt.Println(ColorYellow + "Bye!" + ColorReset)
 		os.Exit(0)
@@ -39,7 +45,10 @@ func HandleCommand(db *engine.Engine, line string) {
 	}
 }
 
-// === Handlers ===
+/* --- existing handlers (insertOne, findOne, findMany, updateOne, deleteOne, dumpAll) --- */
+
+// (You can copy the same implementations from previous version — keep them as-is)
+// For brevity here we reuse the previous handlers but ensure findMany now uses e.FindMany
 
 func handleInsertOne(db *engine.Engine, line string, parts []string) {
 	if len(parts) < 3 {
@@ -114,28 +123,10 @@ func handleFindMany(db *engine.Engine, line string, parts []string) {
 		return
 	}
 
-	results := []map[string]interface{}{}
-	for key := range db.Index() {
-		if strings.HasPrefix(key, collection+":") {
-			val, err := db.Get([]byte(key))
-			if err != nil {
-				continue
-			}
-			var doc map[string]interface{}
-			if err := json.Unmarshal(val, &doc); err != nil {
-				continue
-			}
-			match := true
-			for k, v := range query {
-				if doc[k] != v {
-					match = false
-					break
-				}
-			}
-			if match {
-				results = append(results, doc)
-			}
-		}
+	results, err := db.FindMany(collection, query)
+	if err != nil {
+		fmt.Println(ColorRed+"Error findMany:"+ColorReset, err)
+		return
 	}
 	if len(results) == 0 {
 		fmt.Println(ColorYellow + "No documents found" + ColorReset)
@@ -254,5 +245,45 @@ func handleDumpAll(db *engine.Engine, parts []string) {
 		fmt.Println(ColorRed+"Error writing "+fileName+":"+ColorReset, err)
 	} else {
 		fmt.Println(ColorGreen + "Exported to " + fileName + ColorReset)
+	}
+}
+
+/* --- new handlers for DumpDB / RestoreDB / Compact --- */
+
+func handleDumpDB(db *engine.Engine, parts []string) {
+	var fileName string
+	if len(parts) >= 2 {
+		fileName = parts[1]
+	} else {
+		now := time.Now()
+		fileName = fmt.Sprintf("tinydb_dump_%02d-%02d_%02d-%02d-%04d.json",
+			now.Hour(), now.Minute(),
+			now.Day(), now.Month(), now.Year())
+	}
+	if err := db.DumpDB(fileName); err != nil {
+		fmt.Println(ColorRed+"Error dumping DB:"+ColorReset, err)
+	} else {
+		fmt.Println(ColorGreen+"Exported full DB to"+ColorReset, ColorCyan+fileName+ColorReset)
+	}
+}
+
+func handleRestoreDB(db *engine.Engine, parts []string) {
+	if len(parts) < 2 {
+		fmt.Println(ColorRed + "Usage: restoreDB <file.json>" + ColorReset)
+		return
+	}
+	fileName := parts[1]
+	if err := db.RestoreDB(fileName); err != nil {
+		fmt.Println(ColorRed+"Error restoring DB:"+ColorReset, err)
+	} else {
+		fmt.Println(ColorGreen+"DB restored from"+ColorReset, ColorCyan+fileName+ColorReset)
+	}
+}
+
+func handleCompact(db *engine.Engine) {
+	if err := db.Compact(); err != nil {
+		fmt.Println(ColorRed+"Compact error:"+ColorReset, err)
+	} else {
+		fmt.Println(ColorGreen + "Compaction completed" + ColorReset)
 	}
 }

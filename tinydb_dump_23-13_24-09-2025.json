@@ -1,0 +1,33 @@
+{
+  "customers": [
+    {
+      "_id": "c2",
+      "group": "vip",
+      "name": "Bob"
+    },
+    {
+      "_id": "c3",
+      "group": "normal",
+      "name": "Eve"
+    },
+    {
+      "_id": "c1",
+      "group": "vip",
+      "name": "Alice",
+      "rating": 8
+    }
+  ],
+  "customers3": [
+    {
+      "_id": "c1",
+      "group": "vip",
+      "name": "Alice"
+    }
+  ],
+  "customers_dev": [
+    {
+      "_id": "c1",
+      "name": "Alice"
+    }
+  ]
+}
