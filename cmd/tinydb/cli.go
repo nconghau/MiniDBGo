@@ -8,7 +8,7 @@ import (
 	"github.com/your-username/mini-db-go/internal/lsm"
 )
 
-// RunCLI runs the interactive shell for TinyDB.
+// RunCLI runs the interactive shell for MiniDBGo.
 func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
 	for {
 		line, err := rl.Readline()

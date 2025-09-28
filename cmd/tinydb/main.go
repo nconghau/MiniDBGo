@@ -9,12 +9,12 @@ import (
 )
 
 func main() {
-	db, err := lsm.OpenLSM("data/tiny")
+	db, err := lsm.OpenLSM("data/MiniDBGo")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println(ColorGreen + "TinyDB CLI (Mongo-like, @Index21)" + ColorReset)
+	fmt.Println(ColorGreen + "MiniDBGo CLI (Mongo-like, @Index21)" + ColorReset)
 	fmt.Println("Commands:")
 	fmt.Println(ColorCyan + " insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit" + ColorReset)
 	fmt.Println(ColorYellow + "\nExamples:" + ColorReset)
@@ -32,7 +32,7 @@ func main() {
 
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          ColorYellow + "> " + ColorReset,
-		HistoryFile:     "/tmp/tinydb.history",
+		HistoryFile:     "/tmp/MiniDBGo.history",
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 		AutoComplete:    completer{db: db}, // from autocomplete.go

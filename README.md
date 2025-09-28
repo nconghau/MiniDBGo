@@ -1,15 +1,15 @@
 
 -----
 
-# TinyDB: A Lightweight, Mongo-like Database in Go
+# MiniDBGo: A Lightweight, Mongo-like Database in Go
 
 ## Overview
 
-TinyDB is a lightweight, educational database engine written in Go, inspired by MongoDB. This project is designed as a learning resource to understand core database internals such as CRUD operations, durability through Write-Ahead Logs (WAL), and the storage architecture of a Log-Structured Merge-Tree (LSM-Tree).
+MiniDBGo is a lightweight, educational database engine written in Go, inspired by MongoDB. This project is designed as a learning resource to understand core database internals such as CRUD operations, durability through Write-Ahead Logs (WAL), and the storage architecture of a Log-Structured Merge-Tree (LSM-Tree).
 
 ## Core Architecture: How It Works (LSM-Tree)
 
-TinyDB is built upon a **Log-Structured Merge-Tree (LSM-Tree)**, an architecture optimized for high write throughput. Here’s a simple breakdown of how it operates:
+MiniDBGo is built upon a **Log-Structured Merge-Tree (LSM-Tree)**, an architecture optimized for high write throughput. Here’s a simple breakdown of how it operates:
 
 ### ✍️ The Write Path (Handling New Data)
 
@@ -21,7 +21,7 @@ When you insert or update data (`insertOne`, `updateOne`):
 
 ### 🔍 The Read Path (Finding Your Data)
 
-When you fetch data (`findOne`, `findMany`), TinyDB searches for the key in a specific order to ensure the most recent data is found first:
+When you fetch data (`findOne`, `findMany`), MiniDBGo searches for the key in a specific order to ensure the most recent data is found first:
 
 1.  **Check the MemTable**: The active MemTable is checked first, as it contains the very latest writes.
 2.  **Check Immutable MemTables**: Any "frozen" MemTables that are waiting to be flushed to disk are checked next.
@@ -46,15 +46,15 @@ Over time, many small SSTable files can be created. The `compact` command trigge
 ### 1\. Clone and Run
 
 ```bash
-git clone https://github.com/your-username/tinydb
-cd tinydb
-go run ./cmd/tinydb
+git clone https://github.com/your-username/MiniDBGo
+cd MiniDBGo
+go run ./cmd/MiniDBGo
 ```
 
 ### 2\. Example Usage
 
 ```bash
-TinyDB CLI (Mongo-like, @Index20)
+MiniDBGo CLI (Mongo-like, @Index20)
 Commands: insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit
 
 > insertOne customers {"_id":"c1","name":"Alice","group":"vip"}
@@ -70,15 +70,15 @@ This project is for **educational purposes only** and is not production-ready. I
 
 -----
 
-# TinyDB: Cơ sở dữ liệu gọn nhẹ, kiểu MongoDB, viết bằng Go
+# MiniDBGo: Cơ sở dữ liệu gọn nhẹ, kiểu MongoDB, viết bằng Go
 
 ## Tổng quan
 
-TinyDB là một engine cơ sở dữ liệu gọn nhẹ cho mục đích học tập, được viết bằng Go và lấy cảm hứng từ MongoDB. Dự án này được thiết kế như một tài nguyên học hỏi để hiểu về các thành phần cốt lõi bên trong một database, ví dụ như các hoạt động CRUD, cơ chế đảm bảo an toàn dữ liệu qua Write-Ahead Logs (WAL), và kiến trúc lưu trữ của Log-Structured Merge-Tree (LSM-Tree).
+MiniDBGo là một engine cơ sở dữ liệu gọn nhẹ cho mục đích học tập, được viết bằng Go và lấy cảm hứng từ MongoDB. Dự án này được thiết kế như một tài nguyên học hỏi để hiểu về các thành phần cốt lõi bên trong một database, ví dụ như các hoạt động CRUD, cơ chế đảm bảo an toàn dữ liệu qua Write-Ahead Logs (WAL), và kiến trúc lưu trữ của Log-Structured Merge-Tree (LSM-Tree).
 
 ## Kiến trúc Lõi: Cách Hoạt động (LSM-Tree)
 
-TinyDB được xây dựng dựa trên kiến trúc **Log-Structured Merge-Tree (LSM-Tree)**, một kiến trúc được tối ưu cho việc ghi dữ liệu với thông lượng cao. Dưới đây là mô tả đơn giản về cách nó vận hành:
+MiniDBGo được xây dựng dựa trên kiến trúc **Log-Structured Merge-Tree (LSM-Tree)**, một kiến trúc được tối ưu cho việc ghi dữ liệu với thông lượng cao. Dưới đây là mô tả đơn giản về cách nó vận hành:
 
 ### ✍️ Luồng Ghi Dữ liệu (Khi có dữ liệu mới)
 
@@ -90,7 +90,7 @@ Khi bạn chèn hoặc cập nhật dữ liệu (`insertOne`, `updateOne`):
 
 ### 🔍 Luồng Đọc Dữ liệu (Khi tìm kiếm)
 
-Khi bạn lấy dữ liệu (`findOne`, `findMany`), TinyDB sẽ tìm kiếm key theo một thứ tự cụ thể để đảm bảo dữ liệu mới nhất luôn được tìm thấy đầu tiên:
+Khi bạn lấy dữ liệu (`findOne`, `findMany`), MiniDBGo sẽ tìm kiếm key theo một thứ tự cụ thể để đảm bảo dữ liệu mới nhất luôn được tìm thấy đầu tiên:
 
 1.  **Kiểm tra MemTable**: MemTable đang hoạt động sẽ được kiểm tra trước tiên, vì nó chứa các bản ghi mới nhất.
 2.  **Kiểm tra Immutable MemTables**: Bất kỳ MemTable nào đã bị "đóng băng" và đang chờ được ghi xuống đĩa sẽ được kiểm tra tiếp theo.
@@ -115,15 +115,15 @@ Theo thời gian, sẽ có nhiều file SSTable nhỏ được tạo ra. Lệnh 
 ### 1\. Tải về và Chạy
 
 ```bash
-git clone https://github.com/your-username/tinydb
-cd tinydb
-go run ./cmd/tinydb
+git clone https://github.com/your-username/MiniDBGo
+cd MiniDBGo
+go run ./cmd/MiniDBGo
 ```
 
 ### 2\. Ví dụ Sử dụng
 
 ```bash
-TinyDB CLI (Mongo-like, @Index20)
+MiniDBGo CLI (Mongo-like, @Index20)
 Commands: insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit
 
 > insertOne customers {"_id":"c1","name":"Alice","group":"vip"}

@@ -9,7 +9,7 @@ import (
 	"github.com/your-username/mini-db-go/internal/storage"
 )
 
-// Usage: go run ./cmd/tinydb migrate <old-db-path> <lsm-dir>
+// Usage: go run ./cmd/MiniDBGo migrate <old-db-path> <lsm-dir>
 func mainMigrate() {
 	if len(os.Args) < 4 {
 		fmt.Println("Usage: migrate <old-db-path> <lsm-dir>")

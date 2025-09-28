@@ -1,0 +1,10 @@
+{
+  "customers": [
+    {
+      "_id": "c2",
+      "group": "vip",
+      "name": "Alice 2",
+      "rating": 8
+    }
+  ]
+}
