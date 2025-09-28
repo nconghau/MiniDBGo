@@ -1,0 +1,14 @@
+{
+  "customers": [
+    {
+      "_id": "c1",
+      "address": {
+        "city": "HCM",
+        "zip": "700000"
+      },
+      "group": "vip",
+      "name": "Alice Nguyen",
+      "rating": 10
+    }
+  ]
+}
