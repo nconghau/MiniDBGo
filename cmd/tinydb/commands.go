@@ -3,287 +3,261 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"os"
 	"strings"
 	"time"
 
-	"github.com/your-username/mini-db-go/internal/engine"
+	"github.com/your-username/mini-db-go/internal/lsm"
 )
 
-func HandleCommand(db *engine.Engine, line string) {
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
+// insertOne <collection> <jsonDoc>
+func handleInsertOne(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: insertOne <collection> <jsonDoc>")
 		return
 	}
-	cmd := strings.ToLower(parts[0])
-
-	switch cmd {
-	case "insertone":
-		handleInsertOne(db, line, parts)
-	case "findone":
-		handleFindOne(db, line, parts)
-	case "findmany":
-		handleFindMany(db, line, parts)
-	case "updateone":
-		handleUpdateOne(db, line, parts)
-	case "deleteone":
-		handleDeleteOne(db, line, parts)
-	case "dumpall":
-		handleDumpAll(db, parts)
-	case "dumpdb":
-		handleDumpDB(db, parts)
-	case "restoredb":
-		handleRestoreDB(db, parts)
-	case "compact":
-		handleCompact(db)
-	case "exit", "quit":
-		fmt.Println(ColorYellow + "Bye!" + ColorReset)
-		os.Exit(0)
-	default:
-		fmt.Println(ColorRed+"Unknown command:"+ColorReset, cmd)
-	}
-}
-
-/* --- existing handlers (insertOne, findOne, findMany, updateOne, deleteOne, dumpAll) --- */
-
-// (You can copy the same implementations from previous version — keep them as-is)
-// For brevity here we reuse the previous handlers but ensure findMany now uses e.FindMany
-
-func handleInsertOne(db *engine.Engine, line string, parts []string) {
-	if len(parts) < 3 {
-		fmt.Println(ColorRed + "Usage: insertOne <collection> <jsonDoc>" + ColorReset)
-		return
-	}
-	collection := parts[1]
-	docRaw := strings.TrimSpace(line[len(parts[0])+len(collection)+2:])
+	col := parts[0]
+	docStr := parts[1]
 
 	var doc map[string]interface{}
-	if err := json.Unmarshal([]byte(docRaw), &doc); err != nil {
-		fmt.Println(ColorRed+"Invalid JSON:"+ColorReset, err)
+	if err := json.Unmarshal([]byte(docStr), &doc); err != nil {
+		fmt.Println("Invalid JSON:", err)
 		return
 	}
 	id, ok := doc["_id"].(string)
 	if !ok {
-		fmt.Println(ColorRed + "Document must have string _id field" + ColorReset)
+		fmt.Println("Document must contain string _id field")
 		return
 	}
-	if err := db.Put([]byte(collection+":"+id), []byte(docRaw)); err != nil {
-		fmt.Println(ColorRed+"Error:"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen+"Inserted"+ColorReset,
-			ColorYellow+collection+ColorReset,
-			ColorCyan+id+ColorReset)
+
+	key := col + ":" + id
+	raw, _ := json.Marshal(doc)
+	if err := db.Put([]byte(key), raw); err != nil {
+		fmt.Println("Insert error:", err)
+		return
 	}
+	fmt.Println("Inserted", id, "into", col)
 }
 
-func handleFindOne(db *engine.Engine, line string, parts []string) {
-	if len(parts) < 3 {
-		fmt.Println(ColorRed + "Usage: findOne <collection> <jsonQuery>" + ColorReset)
+// findOne <collection> <jsonFilter>
+func handleFindOne(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: findOne <collection> <jsonFilter>")
 		return
 	}
-	collection := parts[1]
-	queryRaw := strings.TrimSpace(line[len(parts[0])+len(collection)+2:])
+	col := parts[0]
+	filterStr := parts[1]
 
-	var query map[string]interface{}
-	if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-		fmt.Println(ColorRed+"Invalid JSON:"+ColorReset, err)
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
 		return
 	}
-	id, ok := query["_id"].(string)
+	id, ok := filter["_id"].(string)
 	if !ok {
-		fmt.Println(ColorRed + "Query must have string _id" + ColorReset)
+		fmt.Println("findOne currently supports {_id:...}")
 		return
 	}
-	val, err := db.Get([]byte(collection + ":" + id))
+	key := col + ":" + id
+	val, err := db.Get([]byte(key))
 	if err != nil {
-		fmt.Println(ColorRed+"Error:"+ColorReset, err)
-	} else {
-		var pretty map[string]interface{}
-		if err := json.Unmarshal(val, &pretty); err == nil {
-			b, _ := json.MarshalIndent(pretty, "", "  ")
-			fmt.Println(ColorCyan + string(b) + ColorReset)
-		} else {
-			fmt.Println(ColorCyan + string(val) + ColorReset)
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println(prettyJSON(val))
+}
+
+// findMany <collection> <jsonFilter>
+func handleFindMany(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: findMany <collection> <jsonFilter>")
+		return
+	}
+	col := parts[0]
+	filterStr := parts[1]
+
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
+		return
+	}
+
+	keys, _ := db.IterKeys()
+	for _, k := range keys {
+		if !strings.HasPrefix(k, col+":") {
+			continue
+		}
+		val, err := db.Get([]byte(k))
+		if err != nil {
+			continue
+		}
+		var doc map[string]interface{}
+		if err := json.Unmarshal(val, &doc); err != nil {
+			continue
+		}
+		if matchFilter(doc, filter) {
+			fmt.Println(prettyJSON(val))
 		}
 	}
 }
 
-func handleFindMany(db *engine.Engine, line string, parts []string) {
+// updateOne <collection> <jsonFilter> <jsonUpdate>
+func handleUpdateOne(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 3)
 	if len(parts) < 3 {
-		fmt.Println(ColorRed + "Usage: findMany <collection> <jsonQuery>" + ColorReset)
+		fmt.Println("Usage: updateOne <collection> <jsonFilter> <jsonUpdate>")
 		return
 	}
-	collection := parts[1]
-	queryRaw := strings.TrimSpace(line[len(parts[0])+len(collection)+2:])
+	col := parts[0]
+	filterStr := parts[1]
+	updateStr := parts[2]
 
-	var query map[string]interface{}
-	if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-		fmt.Println(ColorRed+"Invalid JSON query:"+ColorReset, err)
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
 		return
 	}
-
-	results, err := db.FindMany(collection, query)
-	if err != nil {
-		fmt.Println(ColorRed+"Error findMany:"+ColorReset, err)
-		return
-	}
-	if len(results) == 0 {
-		fmt.Println(ColorYellow + "No documents found" + ColorReset)
-	} else {
-		data, _ := json.MarshalIndent(results, "", "  ")
-		fmt.Println(ColorCyan + string(data) + ColorReset)
-	}
-}
-
-func handleUpdateOne(db *engine.Engine, line string, parts []string) {
-	args := strings.SplitN(line, " ", 4)
-	if len(args) < 4 {
-		fmt.Println(ColorRed + "Usage: updateOne <collection> <jsonQuery> <jsonUpdate>" + ColorReset)
-		return
-	}
-	collection := args[1]
-	queryRaw := args[2]
-	updateRaw := args[3]
-
-	var query map[string]interface{}
-	if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-		fmt.Println(ColorRed+"Invalid JSON query:"+ColorReset, err)
-		return
-	}
-	id, ok := query["_id"].(string)
+	id, ok := filter["_id"].(string)
 	if !ok {
-		fmt.Println(ColorRed + "Query must have string _id" + ColorReset)
+		fmt.Println("updateOne currently supports {_id:...}")
 		return
 	}
-
-	oldVal, err := db.Get([]byte(collection + ":" + id))
+	key := col + ":" + id
+	val, err := db.Get([]byte(key))
 	if err != nil {
-		fmt.Println(ColorRed+"Error:"+ColorReset, err)
+		fmt.Println("Error:", err)
 		return
 	}
 	var doc map[string]interface{}
-	_ = json.Unmarshal(oldVal, &doc)
+	_ = json.Unmarshal(val, &doc)
 
 	var update map[string]map[string]interface{}
-	if err := json.Unmarshal([]byte(updateRaw), &update); err != nil {
-		fmt.Println(ColorRed+"Invalid JSON update:"+ColorReset, err)
+	if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
+		fmt.Println("Invalid update JSON:", err)
 		return
 	}
-	if setFields, ok := update["$set"]; ok {
-		for k, v := range setFields {
+	if set, ok := update["$set"]; ok {
+		for k, v := range set {
 			doc[k] = v
 		}
 	}
 
-	newDoc, _ := json.Marshal(doc)
-	if err := db.Update([]byte(collection+":"+id), newDoc); err != nil {
-		fmt.Println(ColorRed+"Error:"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen+"Updated"+ColorReset,
-			ColorYellow+collection+ColorReset,
-			ColorCyan+id+ColorReset)
+	raw, _ := json.Marshal(doc)
+	if err := db.Put([]byte(key), raw); err != nil {
+		fmt.Println("Update error:", err)
+		return
 	}
+	fmt.Println("Updated", id, "in", col)
 }
 
-func handleDeleteOne(db *engine.Engine, line string, parts []string) {
-	if len(parts) < 3 {
-		fmt.Println(ColorRed + "Usage: deleteOne <collection> <jsonQuery>" + ColorReset)
-		return
-	}
-	collection := parts[1]
-	queryRaw := strings.TrimSpace(line[len(parts[0])+len(collection)+2:])
-
-	var query map[string]interface{}
-	if err := json.Unmarshal([]byte(queryRaw), &query); err != nil {
-		fmt.Println(ColorRed+"Invalid JSON:"+ColorReset, err)
-		return
-	}
-	id, ok := query["_id"].(string)
-	if !ok {
-		fmt.Println(ColorRed + "Query must have string _id" + ColorReset)
-		return
-	}
-	if err := db.Delete([]byte(collection + ":" + id)); err != nil {
-		fmt.Println(ColorRed+"Error:"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen+"Deleted"+ColorReset,
-			ColorYellow+collection+ColorReset,
-			ColorCyan+id+ColorReset)
-	}
-}
-
-func handleDumpAll(db *engine.Engine, parts []string) {
+// deleteOne <collection> <jsonFilter>
+func handleDeleteOne(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 2)
 	if len(parts) < 2 {
-		fmt.Println(ColorRed + "Usage: dumpAll <collection>" + ColorReset)
+		fmt.Println("Usage: deleteOne <collection> <jsonFilter>")
 		return
 	}
-	collection := parts[1]
-	results := []map[string]interface{}{}
-	for key := range db.Index() {
-		if strings.HasPrefix(key, collection+":") {
-			val, err := db.Get([]byte(key))
-			if err != nil {
-				continue
-			}
-			var doc map[string]interface{}
-			if err := json.Unmarshal(val, &doc); err == nil {
-				results = append(results, doc)
+	col := parts[0]
+	filterStr := parts[1]
+
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
+		return
+	}
+	id, ok := filter["_id"].(string)
+	if !ok {
+		fmt.Println("deleteOne currently supports {_id:...}")
+		return
+	}
+	key := col + ":" + id
+	if err := db.Delete([]byte(key)); err != nil {
+		fmt.Println("Delete error:", err)
+		return
+	}
+	fmt.Println("Deleted", id, "from", col)
+}
+
+// dumpAll <collection>
+func handleDumpAll(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 1)
+	if len(parts) < 1 {
+		fmt.Println("Usage: dumpAll <collection>")
+		return
+	}
+	col := parts[0]
+
+	keys, _ := db.IterKeys()
+	for _, k := range keys {
+		if strings.HasPrefix(k, col+":") {
+			val, err := db.Get([]byte(k))
+			if err == nil {
+				fmt.Println(prettyJSON(val))
 			}
 		}
 	}
-
-	now := time.Now()
-	fileName := fmt.Sprintf("%s_dump_%02d-%02d_%02d-%02d-%04d.json",
-		collection,
-		now.Hour(), now.Minute(),
-		now.Day(), now.Month(), now.Year(),
-	)
-
-	data, _ := json.MarshalIndent(results, "", "  ")
-	if err := ioutil.WriteFile(fileName, data, 0644); err != nil {
-		fmt.Println(ColorRed+"Error writing "+fileName+":"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen + "Exported to " + fileName + ColorReset)
-	}
 }
 
-/* --- new handlers for DumpDB / RestoreDB / Compact --- */
-
-func handleDumpDB(db *engine.Engine, parts []string) {
-	var fileName string
-	if len(parts) >= 2 {
-		fileName = parts[1]
-	} else {
-		now := time.Now()
-		fileName = fmt.Sprintf("tinydb_dump_%02d-%02d_%02d-%02d-%04d.json",
-			now.Hour(), now.Minute(),
-			now.Day(), now.Month(), now.Year())
-	}
-	if err := db.DumpDB(fileName); err != nil {
-		fmt.Println(ColorRed+"Error dumping DB:"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen+"Exported full DB to"+ColorReset, ColorCyan+fileName+ColorReset)
-	}
-}
-
-func handleRestoreDB(db *engine.Engine, parts []string) {
-	if len(parts) < 2 {
-		fmt.Println(ColorRed + "Usage: restoreDB <file.json>" + ColorReset)
+// dumpDB
+func handleDumpDB(db *lsm.LSMEngine, rest string) {
+	file := fmt.Sprintf("dump_%s.json", time.Now().Format("150405_02012006"))
+	if err := db.DumpDB(file); err != nil {
+		fmt.Println("Dump error:", err)
 		return
 	}
-	fileName := parts[1]
-	if err := db.RestoreDB(fileName); err != nil {
-		fmt.Println(ColorRed+"Error restoring DB:"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen+"DB restored from"+ColorReset, ColorCyan+fileName+ColorReset)
-	}
+	fmt.Println("Dumped DB to", file)
 }
 
-func handleCompact(db *engine.Engine) {
-	if err := db.Compact(); err != nil {
-		fmt.Println(ColorRed+"Compact error:"+ColorReset, err)
-	} else {
-		fmt.Println(ColorGreen + "Compaction completed" + ColorReset)
+// restoreDB <file.json>
+func handleRestoreDB(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 1)
+	if len(parts) < 1 {
+		fmt.Println("Usage: restoreDB <file.json>")
+		return
 	}
+	file := parts[0]
+	if err := db.RestoreDB(file); err != nil {
+		fmt.Println("Restore error:", err)
+		return
+	}
+	fmt.Println("Restored DB from", file)
+}
+
+// compact
+func handleCompact(db *lsm.LSMEngine) {
+	if err := db.Compact(); err != nil {
+		fmt.Println("Compact error:", err)
+		return
+	}
+	fmt.Println("Compaction complete")
+}
+
+// --- utils ---
+
+func prettyJSON(b []byte) string {
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return string(b)
+	}
+	out, _ := json.MarshalIndent(m, "", "  ")
+	return string(out)
+}
+
+// splitArgs splits a string into N parts (N-1 splits), keeping JSON intact.
+func splitArgs(s string, n int) []string {
+	parts := make([]string, 0, n)
+	for i := 0; i < n-1; i++ {
+		idx := strings.IndexAny(s, " \t")
+		if idx < 0 {
+			return append(parts, strings.TrimSpace(s))
+		}
+		parts = append(parts, strings.TrimSpace(s[:idx]))
+		s = strings.TrimSpace(s[idx+1:])
+	}
+	if s != "" {
+		parts = append(parts, s)
+	}
+	return parts
 }
