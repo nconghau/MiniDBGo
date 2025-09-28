@@ -8,12 +8,12 @@ import (
 	"github.com/your-username/mini-db-go/internal/lsm"
 )
 
-// RunCLI reads lines, split command and rest, dispatch to handlers.
+// RunCLI runs the interactive shell for TinyDB.
 func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
 	for {
 		line, err := rl.Readline()
 		if err != nil {
-			// readline EOF / Ctrl+C
+			// Ctrl+D / Ctrl+C / EOF
 			fmt.Println()
 			return
 		}
@@ -51,10 +51,8 @@ func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
 	}
 }
 
-// splitCmdRest splits the input line into the first word (command)
-// and the rest (may contain JSONs with spaces).
+// splitCmdRest extracts the command (first token) and the rest of the line (raw).
 func splitCmdRest(line string) (cmd, rest string) {
-	// find first whitespace
 	for i, r := range line {
 		if r == ' ' || r == '\t' {
 			return line[:i], strings.TrimSpace(line[i+1:])

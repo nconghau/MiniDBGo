@@ -3,104 +3,90 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/your-username/mini-db-go/internal/lsm"
 )
 
-// helper: parse "<collection> <one JSON>" where JSON may contain spaces
-func parseCollectionAndOneJSON(rest string) (collection string, doc map[string]interface{}, err error) {
-	rest = strings.TrimSpace(rest)
-	// collection is first token
-	idx := strings.IndexAny(rest, " \t")
-	if idx == -1 {
-		return "", nil, fmt.Errorf("missing collection or JSON")
-	}
-	collection = rest[:idx]
-	jsonPart := strings.TrimSpace(rest[idx+1:])
-	dec := json.NewDecoder(strings.NewReader(jsonPart))
-	dec.UseNumber()
-	if err = dec.Decode(&doc); err != nil {
-		return "", nil, err
-	}
-	return collection, doc, nil
-}
-
-// helper: parse "<collection> <json1> <json2>" where json1/json2 may contain spaces
-func parseCollectionAndTwoJSON(rest string) (collection string, j1 map[string]interface{}, j2 map[string]interface{}, err error) {
-	rest = strings.TrimSpace(rest)
-	idx := strings.IndexAny(rest, " \t")
-	if idx == -1 {
-		return "", nil, nil, fmt.Errorf("missing collection or JSONs")
-	}
-	collection = rest[:idx]
-	remain := strings.TrimSpace(rest[idx+1:])
-	dec := json.NewDecoder(strings.NewReader(remain))
-	dec.UseNumber()
-	if err = dec.Decode(&j1); err != nil {
-		return collection, nil, nil, fmt.Errorf("invalid first JSON: %w", err)
-	}
-	if err = dec.Decode(&j2); err != nil {
-		return collection, j1, nil, fmt.Errorf("invalid second JSON: %w", err)
-	}
-	return collection, j1, j2, nil
-}
-
-// insertOne <collection> <json>
+// insertOne <collection> <jsonDoc>
 func handleInsertOne(db *lsm.LSMEngine, rest string) {
-	collection, doc, err := parseCollectionAndOneJSON(rest)
-	if err != nil {
-		fmt.Println("Usage: insertOne <collection> <json>   — parse error:", err)
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: insertOne <collection> <jsonDoc>")
 		return
 	}
-	idVal, ok := doc["_id"]
+	col := parts[0]
+	docStr := parts[1]
+
+	var doc map[string]interface{}
+	if err := json.Unmarshal([]byte(docStr), &doc); err != nil {
+		fmt.Println("Invalid JSON:", err)
+		return
+	}
+	id, ok := doc["_id"].(string)
 	if !ok {
-		fmt.Println("Document must contain _id field")
+		fmt.Println("Document must contain string _id field")
 		return
 	}
-	id := fmt.Sprintf("%v", idVal)
+
+	key := col + ":" + id
 	raw, _ := json.Marshal(doc)
-	if err := db.Put([]byte(collection+":"+id), raw); err != nil {
+	if err := db.Put([]byte(key), raw); err != nil {
 		fmt.Println("Insert error:", err)
 		return
 	}
-	fmt.Printf("Inserted into %s with _id=%s\n", collection, id)
+	fmt.Println("Inserted", id, "into", col)
 }
 
 // findOne <collection> <jsonFilter>
 func handleFindOne(db *lsm.LSMEngine, rest string) {
-	collection, filter, err := parseCollectionAndOneJSON(rest)
-	if err != nil {
-		fmt.Println("Usage: findOne <collection> <jsonFilter> — parse error:", err)
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: findOne <collection> <jsonFilter>")
 		return
 	}
-	idVal, ok := filter["_id"]
+	col := parts[0]
+	filterStr := parts[1]
+
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
+		return
+	}
+	id, ok := filter["_id"].(string)
 	if !ok {
 		fmt.Println("findOne currently supports {_id:...}")
 		return
 	}
-	id := fmt.Sprintf("%v", idVal)
-	val, err := db.Get([]byte(collection + ":" + id))
+	key := col + ":" + id
+	val, err := db.Get([]byte(key))
 	if err != nil {
-		fmt.Println("Not found")
+		fmt.Println("Error:", err)
 		return
 	}
-	fmt.Println(string(val))
+	fmt.Println(prettyJSON(val))
 }
 
 // findMany <collection> <jsonFilter>
 func handleFindMany(db *lsm.LSMEngine, rest string) {
-	collection, filter, err := parseCollectionAndOneJSON(rest)
-	if err != nil {
-		fmt.Println("Usage: findMany <collection> <jsonFilter> — parse error:", err)
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: findMany <collection> <jsonFilter>")
 		return
 	}
+	col := parts[0]
+	filterStr := parts[1]
+
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
+		return
+	}
+
 	keys, _ := db.IterKeys()
-	results := 0
 	for _, k := range keys {
-		if !strings.HasPrefix(k, collection+":") {
+		if !strings.HasPrefix(k, col+":") {
 			continue
 		}
 		val, err := db.Get([]byte(k))
@@ -112,140 +98,126 @@ func handleFindMany(db *lsm.LSMEngine, rest string) {
 			continue
 		}
 		if matchFilter(doc, filter) {
-			js, _ := json.MarshalIndent(doc, "", "  ")
-			fmt.Println(string(js))
-			results++
+			fmt.Println(prettyJSON(val))
 		}
-	}
-	if results == 0 {
-		// print empty array for clarity
-		fmt.Println("[]")
 	}
 }
 
 // updateOne <collection> <jsonFilter> <jsonUpdate>
 func handleUpdateOne(db *lsm.LSMEngine, rest string) {
-	collection, filter, update, err := parseCollectionAndTwoJSON(rest)
-	if err != nil {
-		fmt.Println("Usage: updateOne <collection> <filterJSON> <updateJSON> — parse error:", err)
+	parts := splitArgs(rest, 3)
+	if len(parts) < 3 {
+		fmt.Println("Usage: updateOne <collection> <jsonFilter> <jsonUpdate>")
 		return
 	}
-	idVal, ok := filter["_id"]
+	col := parts[0]
+	filterStr := parts[1]
+	updateStr := parts[2]
+
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
+		return
+	}
+	id, ok := filter["_id"].(string)
 	if !ok {
 		fmt.Println("updateOne currently supports {_id:...}")
 		return
 	}
-	id := fmt.Sprintf("%v", idVal)
-	key := collection + ":" + id
-
+	key := col + ":" + id
 	val, err := db.Get([]byte(key))
 	if err != nil {
-		fmt.Println("Not found:", id)
+		fmt.Println("Error:", err)
 		return
 	}
 	var doc map[string]interface{}
-	if err := json.Unmarshal(val, &doc); err != nil {
-		fmt.Println("Invalid stored document:", err)
+	_ = json.Unmarshal(val, &doc)
+
+	var update map[string]map[string]interface{}
+	if err := json.Unmarshal([]byte(updateStr), &update); err != nil {
+		fmt.Println("Invalid update JSON:", err)
 		return
 	}
-
-	// update may be { "$set": { ... } } - treat update generically
-	if setObj, ok := update["$set"]; ok {
-		if setMap, ok2 := setObj.(map[string]interface{}); ok2 {
-			for k, v := range setMap {
-				doc[k] = v
-			}
-		} else {
-			fmt.Println("$set must be an object")
-			return
-		}
-	} else {
-		// support direct replacement if top-level not $set
-		// if update has "_id" keep same id
-		for k, v := range update {
+	if set, ok := update["$set"]; ok {
+		for k, v := range set {
 			doc[k] = v
 		}
 	}
 
-	newRaw, _ := json.Marshal(doc)
-	if err := db.Put([]byte(key), newRaw); err != nil {
+	raw, _ := json.Marshal(doc)
+	if err := db.Put([]byte(key), raw); err != nil {
 		fmt.Println("Update error:", err)
 		return
 	}
-	fmt.Printf("Updated %s in %s\n", id, collection)
+	fmt.Println("Updated", id, "in", col)
 }
 
 // deleteOne <collection> <jsonFilter>
 func handleDeleteOne(db *lsm.LSMEngine, rest string) {
-	collection, filter, err := parseCollectionAndOneJSON(rest)
-	if err != nil {
-		fmt.Println("Usage: deleteOne <collection> <jsonFilter> — parse error:", err)
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: deleteOne <collection> <jsonFilter>")
 		return
 	}
-	idVal, ok := filter["_id"]
+	col := parts[0]
+	filterStr := parts[1]
+
+	var filter map[string]interface{}
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+		fmt.Println("Invalid filter JSON:", err)
+		return
+	}
+	id, ok := filter["_id"].(string)
 	if !ok {
 		fmt.Println("deleteOne currently supports {_id:...}")
 		return
 	}
-	id := fmt.Sprintf("%v", idVal)
-	if err := db.Delete([]byte(collection + ":" + id)); err != nil {
+	key := col + ":" + id
+	if err := db.Delete([]byte(key)); err != nil {
 		fmt.Println("Delete error:", err)
 		return
 	}
-	fmt.Printf("Deleted %s from %s\n", id, collection)
+	fmt.Println("Deleted", id, "from", col)
 }
 
 // dumpAll <collection>
 func handleDumpAll(db *lsm.LSMEngine, rest string) {
-	collection := strings.TrimSpace(rest)
-	if collection == "" {
+	parts := splitArgs(rest, 1)
+	if len(parts) < 1 {
 		fmt.Println("Usage: dumpAll <collection>")
 		return
 	}
+	col := parts[0]
+
 	keys, _ := db.IterKeys()
-	out := []map[string]interface{}{}
 	for _, k := range keys {
-		if !strings.HasPrefix(k, collection+":") {
-			continue
-		}
-		val, err := db.Get([]byte(k))
-		if err != nil {
-			continue
-		}
-		var doc map[string]interface{}
-		if json.Unmarshal(val, &doc) == nil {
-			out = append(out, doc)
+		if strings.HasPrefix(k, col+":") {
+			val, err := db.Get([]byte(k))
+			if err == nil {
+				fmt.Println(prettyJSON(val))
+			}
 		}
 	}
-	if len(out) == 0 {
-		fmt.Println("[]")
-		return
-	}
-	b, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Println(string(b))
 }
 
 // dumpDB
-func handleDumpDB(db *lsm.LSMEngine, parts string) {
-	filename := fmt.Sprintf("dump_%s.json", time.Now().Format("15-04_02-01-2006"))
-	if err := db.DumpDB(filename); err != nil {
+func handleDumpDB(db *lsm.LSMEngine, rest string) {
+	file := fmt.Sprintf("dump_%s.json", time.Now().Format("150405_02012006"))
+	if err := db.DumpDB(file); err != nil {
 		fmt.Println("Dump error:", err)
 		return
 	}
-	fmt.Println("Dumped DB to", filename)
+	fmt.Println("Dumped DB to", file)
 }
 
 // restoreDB <file.json>
 func handleRestoreDB(db *lsm.LSMEngine, rest string) {
-	file := strings.TrimSpace(rest)
-	if file == "" {
+	parts := splitArgs(rest, 1)
+	if len(parts) < 1 {
 		fmt.Println("Usage: restoreDB <file.json>")
 		return
 	}
-	if _, err := os.Stat(file); os.IsNotExist(err) {
-		fmt.Println("File does not exist:", file)
-		return
-	}
+	file := parts[0]
 	if err := db.RestoreDB(file); err != nil {
 		fmt.Println("Restore error:", err)
 		return
@@ -256,8 +228,36 @@ func handleRestoreDB(db *lsm.LSMEngine, rest string) {
 // compact
 func handleCompact(db *lsm.LSMEngine) {
 	if err := db.Compact(); err != nil {
-		fmt.Println("Compaction error:", err)
+		fmt.Println("Compact error:", err)
 		return
 	}
-	fmt.Println("Compaction done")
+	fmt.Println("Compaction complete")
+}
+
+// --- utils ---
+
+func prettyJSON(b []byte) string {
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return string(b)
+	}
+	out, _ := json.MarshalIndent(m, "", "  ")
+	return string(out)
+}
+
+// splitArgs splits a string into N parts (N-1 splits), keeping JSON intact.
+func splitArgs(s string, n int) []string {
+	parts := make([]string, 0, n)
+	for i := 0; i < n-1; i++ {
+		idx := strings.IndexAny(s, " \t")
+		if idx < 0 {
+			return append(parts, strings.TrimSpace(s))
+		}
+		parts = append(parts, strings.TrimSpace(s[:idx]))
+		s = strings.TrimSpace(s[idx+1:])
+	}
+	if s != "" {
+		parts = append(parts, s)
+	}
+	return parts
 }
