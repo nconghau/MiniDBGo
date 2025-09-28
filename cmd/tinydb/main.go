@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/chzyer/readline"
 	"github.com/your-username/mini-db-go/internal/lsm"
 )
 
@@ -13,7 +14,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println(ColorGreen + "TinyDB CLI (Mongo-like, @Index19)" + ColorReset)
+	fmt.Println(ColorGreen + "TinyDB CLI (Mongo-like, @Index21)" + ColorReset)
 	fmt.Println("Commands:")
 	fmt.Println(ColorCyan + " insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit" + ColorReset)
 	fmt.Println(ColorYellow + "\nExamples:" + ColorReset)
@@ -29,5 +30,17 @@ func main() {
 	fmt.Println(" compact                     # compact DB file (reclaims space)")
 	fmt.Println(" exit\n")
 
-	RunCLI(db)
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          ColorYellow + "> " + ColorReset,
+		HistoryFile:     "/tmp/tinydb.history",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+		AutoComplete:    completer{db: db}, // from autocomplete.go
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer rl.Close()
+
+	RunCLI(db, rl)
 }
