@@ -5,7 +5,7 @@ import (
 	"log"
 
 	"github.com/chzyer/readline"
-	"github.com/your-username/mini-db-go/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
 func main() {

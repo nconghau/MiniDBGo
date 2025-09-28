@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"github.com/your-username/mini-db-go/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
 // Engine là interface chung cho DB engines

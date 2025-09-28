@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/your-username/mini-db-go/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
 // RunCLI runs the interactive shell for MiniDBGo.

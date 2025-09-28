@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/your-username/mini-db-go/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
 // insertOne <collection> <jsonDoc>

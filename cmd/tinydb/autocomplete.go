@@ -3,7 +3,7 @@ package main
 import (
 	"strings"
 
-	"github.com/your-username/mini-db-go/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
 // completer implements readline.AutoCompleter

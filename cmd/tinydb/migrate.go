@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/your-username/mini-db-go/internal/lsm"
-	"github.com/your-username/mini-db-go/internal/storage"
+	"github.com/nconghau/MiniDBGo/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/storage"
 )
 
 // Usage: go run ./cmd/MiniDBGo migrate <old-db-path> <lsm-dir>

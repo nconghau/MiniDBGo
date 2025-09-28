@@ -1,4 +1,4 @@
-module github.com/your-username/mini-db-go
+module github.com/nconghau/MiniDBGo
 
 go 1.22
 

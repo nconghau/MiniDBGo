@@ -46,7 +46,7 @@ Over time, many small SSTable files can be created. The `compact` command trigge
 ### 1\. Clone and Run
 
 ```bash
-git clone https://github.com/your-username/MiniDBGo
+git clone https://github.com/nconghau/MiniDBGo
 cd MiniDBGo
 go run ./cmd/MiniDBGo
 ```
@@ -115,7 +115,7 @@ Theo thời gian, sẽ có nhiều file SSTable nhỏ được tạo ra. Lệnh 
 ### 1\. Tải về và Chạy
 
 ```bash
-git clone https://github.com/your-username/MiniDBGo
+git clone https://github.com/nconghau/MiniDBGo
 cd MiniDBGo
 go run ./cmd/MiniDBGo
 ```
