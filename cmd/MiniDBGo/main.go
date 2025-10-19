@@ -14,6 +14,12 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// --- BẮT ĐẦU THAY ĐỔI ---
+	// Khởi chạy máy chủ HTTP trên cổng 8080 trong một goroutine
+	// Hàm này đến từ tệp server.go mới của chúng ta
+	go startHttpServer(db, ":8080")
+	// --- KẾT THÚC THAY ĐỔI ---
+
 	fmt.Println(ColorGreen + "MiniDBGo CLI (Mongo-like, @Index21)" + ColorReset)
 	fmt.Println("Commands:")
 	fmt.Println(ColorCyan + " insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit" + ColorReset)
