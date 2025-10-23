@@ -39,6 +39,47 @@ func handleInsertOne(db *lsm.LSMEngine, rest string) {
 	fmt.Println("Inserted", id, "into", col)
 }
 
+// insertMany <collection> <jsonArrayOfDocs>
+func handleInsertMany(db *lsm.LSMEngine, rest string) {
+	parts := splitArgs(rest, 2)
+	if len(parts) < 2 {
+		fmt.Println("Usage: insertMany <collection> <jsonArrayOfDocs>")
+		return
+	}
+	col := parts[0]
+	docStr := parts[1]
+
+	var docs []map[string]interface{}
+	// [cite: 25]
+	if err := json.Unmarshal([]byte(docStr), &docs); err != nil {
+		fmt.Println("Invalid JSON Array:", err)
+		return
+	}
+
+	if len(docs) == 0 {
+		fmt.Println("No documents to insert.")
+		return
+	}
+
+	insertedCount := 0
+	for i, doc := range docs {
+		id, ok := doc["_id"].(string)
+		if !ok {
+			fmt.Printf("Error at document index %d: Document must contain string _id field\n", i)
+			continue // Bỏ qua tài liệu này và tiếp tục
+		}
+
+		key := col + ":" + id
+		raw, _ := json.Marshal(doc)
+		if err := db.Put([]byte(key), raw); err != nil {
+			fmt.Printf("Error inserting %s: %v\n", id, err)
+			continue // Bỏ qua tài liệu này
+		}
+		insertedCount++
+	}
+	fmt.Printf("Inserted %d of %d documents into %s\n", insertedCount, len(docs), col)
+}
+
 // findOne <collection> <jsonFilter>
 func handleFindOne(db *lsm.LSMEngine, rest string) {
 	parts := splitArgs(rest, 2)

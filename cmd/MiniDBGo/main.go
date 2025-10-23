@@ -25,6 +25,7 @@ func main() {
 	fmt.Println(ColorCyan + " insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit" + ColorReset)
 	fmt.Println(ColorYellow + "\nExamples:" + ColorReset)
 	fmt.Println(" insertOne customers {\"_id\":\"c1\",\"name\":\"Alice\",\"group\":\"vip\",\"rating\":8}")
+	fmt.Println(" insertMany customers [{\"_id\":\"c1\",\"name\":\"Alice\"}, {\"_id\":\"c2\",\"name\":\"Tomy\"}]")
 	fmt.Println(" findOne customers {\"_id\":\"c1\"}")
 	fmt.Println(" findMany customers {\"group\":\"vip\"}")
 	fmt.Println(" findMany customers {\"rating\":{\"$gt\":5}}")

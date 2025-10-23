@@ -26,6 +26,8 @@ func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
 		switch strings.ToLower(cmd) {
 		case "insertone":
 			handleInsertOne(db, rest)
+		case "insertmany":
+			handleInsertMany(db, rest)
 		case "findone":
 			handleFindOne(db, rest)
 		case "findmany":

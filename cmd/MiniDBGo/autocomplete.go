@@ -12,7 +12,7 @@ type completer struct {
 }
 
 var allCommands = []string{
-	"insertOne", "findOne", "findMany", "updateOne", "deleteOne",
+	"insertOne", "insertMany", "findOne", "findMany", "updateOne", "deleteOne",
 	"dumpAll", "dumpDB", "restoreDB", "compact", "exit",
 }
 
@@ -73,7 +73,7 @@ func (c completer) Do(line []rune, pos int) ([][]rune, int) {
 
 		// commands that take a collection as 1st arg
 		cmdsWithColl := map[string]bool{
-			"insertone": true, "findone": true, "findmany": true,
+			"insertone": true, "insertmany": true, "findone": true, "findmany": true,
 			"updateone": true, "deleteone": true, "dumpall": true,
 		}
 		if !cmdsWithColl[cmdName] {
