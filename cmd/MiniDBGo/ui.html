@@ -6,512 +6,344 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MiniDBGo - API Client</title>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- 1. Tải TailwindCSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
 
+  <!-- 2. Tải Feather Icons -->
   <script src="https://unpkg.com/feather-icons"></script>
 
+  <!-- 3. Tải Highlight.js (cho tô màu JSON) -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
 
+  <!-- 4. CSS Tuỳ chỉnh (Quan trọng) -->
   <style>
-    :root {
-      /* YÊU CẦU 3: BẢNG MÀU LIGHT THEME CHUYÊN NGHIỆP */
-      --bg-color: #F7F7F7;
-      /* Nền chính (rất sáng) */
-      --sidebar-bg: #FFFFFF;
-      /* Sidebar */
-      --card-bg: #FFFFFF;
-      /* Nền thẻ */
-      --border-color: #EAEAEA;
-      /* Viền */
-      --text-color: #242424;
-      /* Chữ chính (tối) */
-      --text-secondary: #6B6B6B;
-      /* Chữ phụ, hướng dẫn */
-      --primary-color: #0066CC;
-      /* Xanh dương (điểm nhấn) */
-      --primary-hover: #0056AC;
-      --danger-color: #D92B2B;
-      --success-color: #1A8A3D;
-      --warn-color: #E58D00;
-      --code-bg: #FFFFFF;
-      /* Nền ô code (sáng) */
-      --code-border: #DCDCDC;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
     body {
-      /* YÊU CẦU 1: SỬ DỤNG FONT OPEN SANS */
-      font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background-color: var(--bg-color);
-      color: var(--text-color);
-      margin: 0;
-      padding: 0;
-      font-size: 14px;
-      line-height: 1.5;
-      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
-    /* BỐ CỤC HEADER + 3 KHUNG (KHÔNG BỂ UI) */
-    .app-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0 24px;
-      height: 55px;
-      /* Giảm 1 chút */
-      background-color: var(--card-bg);
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .app-header h1 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 600;
-    }
-
-    .app-layout {
-      display: flex;
-      height: calc(100vh - 55px);
-      /* Trừ đi header */
-    }
-
-    /* 1. SIDEBAR (TRÁI) */
-    .sidebar {
-      width: 240px;
-      flex-shrink: 0;
-      background-color: var(--sidebar-bg);
-      border-right: 1px solid var(--border-color);
-      display: flex;
-      flex-direction: column;
-    }
-
-    .sidebar-body {
-      padding: 16px;
-      overflow-y: auto;
-      flex-grow: 1;
-    }
-
-    .sidebar-body h2 {
-      font-size: 12px;
-      text-transform: uppercase;
-      color: var(--text-secondary);
-      letter-spacing: 0.5px;
-      margin: 0 0 10px 0;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .sidebar-body h2 button {
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      padding: 2px;
-    }
-
-    .sidebar-body h2 button:hover {
-      color: var(--primary-color);
-    }
-
-    #collection-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-
-    #collection-list li {
-      padding: 8px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: 500;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    #collection-list li i {
-      width: 16px;
-      height: 16px;
-      color: var(--text-secondary);
-    }
-
-    #collection-list li:hover {
-      background-color: var(--bg-color);
-    }
-
-    #collection-list li.active {
-      background-color: var(--primary-color);
-      color: #fff;
-    }
-
-    #collection-list li.active i {
-      color: #fff;
-    }
-
-    /* 2. KHUNG LÀM VIỆC CHÍNH (PHẢI) */
-    .main-content {
-      flex-grow: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      background-color: var(--bg-color);
-    }
-
-    /* 2a. KHUNG YÊU CẦU (REQUEST - TRÊN) */
-    .request-panel {
-      background-color: var(--card-bg);
-      border-bottom: 1px solid var(--border-color);
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-    }
-
-    /* Thanh URL và Nút Send (KHÔNG BỂ UI) */
-    .request-bar {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .request-bar select {
-      width: 100px;
-      padding: 10px 14px;
-      background-color: var(--bg-color);
-      border: 1px solid var(--code-border);
-      color: var(--text-color);
-      border-radius: 6px;
-      font-family: "SFMono-Regular", Consolas, "Courier New", Courier, monospace;
-      font-size: 14px;
-      font-weight: bold;
-    }
-
-    .request-bar input[type="text"] {
-      flex-grow: 1;
-      /* Tự co giãn */
-      padding: 10px 14px;
-      background-color: #FFF;
-      border: 1px solid var(--code-border);
-      color: var(--text-color);
-      border-radius: 6px;
-      font-family: "SFMono-Regular", Consolas, "Courier New", Courier, monospace;
-      font-size: 14px;
-    }
-
-    .request-bar input[type="text"]:focus,
-    .request-bar select:focus {
-      border-color: var(--primary-color);
-      box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.2);
-      outline: none;
-    }
-
-    /* Nút Send */
-    .request-bar button {
-      padding: 10px 22px;
-      background-color: var(--primary-color);
-      color: #ffffff;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 600;
-      font-family: 'Open Sans', sans-serif;
-      transition: all 0.2s ease;
-      white-space: nowrap;
-      /* Đảm bảo không vỡ chữ */
-    }
-
-    .request-bar button:hover {
-      background-color: var(--primary-hover);
-    }
-
-    /* Tabs cho Request Body/Params */
-    .sub-tabs {
-      display: flex;
-      margin-top: 16px;
-      border-bottom: 1px solid var(--border-color);
-    }
-
-    .sub-tab-button {
-      padding: 8px 14px;
-      cursor: pointer;
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      font-size: 14px;
-      font-weight: 500;
-      border-bottom: 2px solid transparent;
-      margin-bottom: -1px;
-      /* Nối liền */
-    }
-
-    .sub-tab-button.active {
-      color: var(--primary-color);
-      border-bottom-color: var(--primary-color);
-    }
-
-    .sub-tab-content {
-      display: none;
-      margin-top: 16px;
-    }
-
-    .sub-tab-content.active {
-      display: block;
-    }
-
-    #request-body-content textarea {
-      width: 100%;
-      height: 150px;
-      resize: vertical;
-      background-color: var(--code-bg);
-      border: 1px solid var(--code-border);
-      color: var(--text-color);
-      border-radius: 6px;
-      font-family: "SFMono-Regular", Consolas, "Courier New", Courier, monospace;
-      font-size: 14px;
-      padding: 12px;
-    }
-
-    /* 2b. KHUNG PHẢN HỒI (RESPONSE - DƯỚI) */
-    .response-panel {
-      flex-grow: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      padding: 16px;
-    }
-
-    .response-status-bar {
-      display: flex;
-      gap: 20px;
-      align-items: center;
-      padding-bottom: 12px;
-    }
-
-    .response-status-bar span {
-      font-weight: 500;
-      font-size: 13px;
-    }
-
-    .response-status-bar b {
-      font-weight: 600;
-    }
-
-    /* Màu cho Status */
-    #response-status.success {
-      color: var(--success-color);
-    }
-
-    #response-status.error {
-      color: var(--danger-color);
-    }
-
-    #response-status.warn {
-      color: var(--warn-color);
-    }
-
-    .response-body-wrapper {
-      flex-grow: 1;
-      overflow-y: auto;
-      /* Chỉ cuộn ô kết quả */
-      border: 1px solid var(--code-border);
-      border-radius: 6px;
-      background-color: var(--code-bg);
-    }
-
-    #response-headers-content {
-      padding: 20px;
-      white-space: pre-wrap;
-      font-family: "SFMono-Regular", Consolas, "Courier New", Courier, monospace;
-      color: var(--text-secondary);
-    }
-
-    /* YÊU CẦU 2: TÔ MÀU JSON KIỂU POSTMAN (LIGHT THEME) */
-    /* Ghi đè toàn bộ CSS của highlight.js */
-    pre code.hljs {
-      padding: 20px;
-      background-color: var(--code-bg);
-      color: var(--text-color);
-      /* Chữ mặc định */
+    /* === YÊU CẦU 2: TÔ MÀU JSON (FIX v3.1) === */
+    /* Tăng tối đa độ đặc hiệu (specificity) bằng cách dùng ID.
+       Điều này đảm bảo các quy tắc bên dưới sẽ THẮNG file github.min.css
+    */
+    pre code#response-body-code.hljs {
+      padding: 1.25rem;
+      background-color: #FFFFFF !important;
+      color: #242424 !important;
       font-size: 14px;
       line-height: 1.7;
     }
 
-    .hljs-attr,
-    .hljs-property {
-      color: #005599;
-      /* Xanh đậm cho Keys */
+    pre code#response-body-code.hljs .hljs-attr,
+    pre code#response-body-code.hljs .hljs-property {
+      color: #9b239b !important;
+      /* Postman: Tím hồng */
     }
 
-    .hljs-string {
-      color: #DD4A11;
-      /* Cam cho Strings */
+    pre code#response-body-code.hljs .hljs-string {
+      color: #DD4A11 !important;
+      /* Postman: Cam */
     }
 
-    .hljs-number {
-      color: #C41A70;
-      /* Tím/Hồng cho Numbers */
+    pre code#response-body-code.hljs .hljs-number {
+      color: #C41A70 !important;
+      /* Postman: Đỏ hồng */
     }
 
-    .hljs-literal {
-      color: #0066CC;
-      /* Xanh dương cho 'true', 'false', 'null' */
+    pre code#response-body-code.hljs .hljs-literal {
+      color: #0066CC !important;
+      /* Postman: Xanh dương */
     }
+
+    /* === KẾT THÚC FIX TÔ MÀU === */
+
 
     pre code.error {
-      color: var(--danger-color);
+      color: #D92B2B;
+      /* Đỏ */
       font-weight: bold;
       white-space: pre-wrap;
     }
 
-    /* Nút chung (danger) */
-    button.button-danger {
-      padding: 8px 16px;
-      background-color: var(--danger-color);
-      color: #ffffff;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 14px;
+    .method-btn[data-method="GET"] {
+      color: #008a00;
       font-weight: 600;
-      font-family: 'Open Sans', sans-serif;
+    }
+
+    .method-btn[data-method="POST"] {
+      color: #0066cc;
+      font-weight: 600;
+    }
+
+    .method-btn[data-method="PUT"] {
+      color: #e58d00;
+      font-weight: 600;
+    }
+
+    .method-btn[data-method="DELETE"] {
+      color: #d92b2b;
+      font-weight: 600;
+    }
+
+    .sub-tab-button.active {
+      color: #2563EB;
+      border-bottom-color: #2563EB;
+    }
+
+    #collection-list li.active {
+      background-color: #EFF6FF;
+      color: #2563EB;
+      font-weight: 600;
+    }
+
+    #collection-list li.active i {
+      color: #2563EB;
     }
   </style>
 </head>
 
-<body>
-  <header class="app-header">
-    <h1>MiniDBGo Client</h1>
-    <button id="btn-compact" class="button-danger">
-      <i data-feather="database" style="width: 14px; height: 14px; vertical-align: -2px;"></i>
-      Compact DB
-    </button>
+<body class="flex flex-col h-screen bg-gray-100 font-sans text-gray-900 overflow-hidden">
+
+  <!-- Lớp phủ cho Sidebar Mobile -->
+  <div id="sidebar-overlay" class="md:hidden fixed inset-0 bg-black/50 z-30 hidden"></div>
+
+  <!-- Header -->
+  <header class="flex-shrink-0 bg-white border-b border-gray-200">
+    <div class="h-16 flex items-center justify-between px-4 max-w-full mx-auto">
+      <div class="flex items-center gap-4">
+        <button id="btn-toggle-sidebar" class="md:hidden p-1 text-gray-600 hover:text-gray-900">
+          <i data-feather="menu" class="w-6 h-6"></i>
+        </button>
+        <h1 class="text-xl font-bold text-gray-800">MiniDBGo Client</h1>
+      </div>
+      <button id="btn-compact"
+        class="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors">
+        <i data-feather="database" class="w-4 h-4"></i>
+        Compact DB
+      </button>
+    </div>
   </header>
 
-  <div class="app-layout">
+  <!-- Bố cục chính (3 cột) -->
+  <div class="flex-1 flex overflow-hidden max-w-full mx-auto w-full">
 
-    <aside class="sidebar">
-      <div class="sidebar-body">
-        <h2>
-          <span>Collections</span>
-          <button id="btn-refresh-collections" title="Refresh Collections"><i data-feather="refresh-cw"></i></button>
-        </h2>
+    <!-- CỘT 1 - COLLECTIONS -->
+    <aside id="sidebar"
+      class="flex-shrink-0 fixed md:static inset-y-0 left-0 z-40 flex flex-col w-64 bg-gray-50 border-r border-gray-200 transform -translate-x-full md:translate-x-0 transition-transform duration-300 ease-in-out">
+      <div class="flex-shrink-0 h-16 flex items-center justify-between p-4 border-b border-gray-200">
+        <h2 class="text-sm font-semibold uppercase text-gray-500 tracking-wider">Collections</h2>
+        <button id="btn-refresh-collections" title="Refresh Collections"
+          class="p-1 text-gray-500 hover:text-blue-600 rounded-full hover:bg-gray-200">
+          <i data-feather="refresh-cw" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto p-2">
         <ul id="collection-list">
+          <!-- JS chèn collections -->
         </ul>
       </div>
     </aside>
 
-    <main class="main-content">
+    <!-- Bố cục 2 cột còn lại -->
+    <main class="flex-1 flex flex-row overflow-hidden p-4 gap-4">
 
-      <div class="request-panel">
-        <div class="request-bar">
-          <select id="rest-method">
-            <option>GET</option>
-            <option selected>POST</option>
-            <option>PUT</option>
-            <option>DELETE</option>
-          </select>
-          <input type="text" id="rest-path" value="/{collection}/_search">
-          <button id="btn-send-rest">
-            <i data-feather="send" style="width: 14px; height: 14px; vertical-align: -2px;"></i>
+      <!-- CỘT 2 - REQUEST -->
+      <div id="request-panel"
+        class="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+
+        <!-- Thanh Request (URL Bar) -->
+        <div class="flex-shrink-0 flex gap-2 p-4 border-b border-gray-200 relative">
+
+          <div>
+            <button id="method-toggle-button" data-method="POST"
+              class="method-btn w-28 text-left px-4 py-2 text-sm font-bold bg-gray-100 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 flex items-center justify-between">
+              <span>POST</span>
+              <i data-feather="chevron-down" class="w-4 h-4"></i>
+            </button>
+            <div id="method-dropdown"
+              class="hidden absolute z-10 w-28 mt-1 bg-white border border-gray-300 rounded-md shadow-lg">
+              <a href="#" class="method-option block px-4 py-2 text-sm" data-method="GET">
+                <span class="method-btn" data-method="GET">GET</span>
+              </a>
+              <a href="#" class="method-option block px-4 py-2 text-sm" data-method="POST">
+                <span class="method-btn" data-method="POST">POST</span>
+              </a>
+              <a href="#" class="method-option block px-4 py-2 text-sm" data-method="PUT">
+                <span class="method-btn" data-method="PUT">PUT</span>
+              </a>
+              <a href="#" class="method-option block px-4 py-2 text-sm" data-method="DELETE">
+                <span class="method-btn" data-method="DELETE">DELETE</span>
+              </a>
+            </div>
+          </div>
+
+          <input type="text" id="rest-path" value="/{collection}/_search" list="collection-suggestions"
+            class="flex-1 min-w-0 px-4 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            placeholder="/{collection}/{id}">
+          <datalist id="collection-suggestions">
+            <!-- JS chèn các <option> vào đây -->
+          </datalist>
+
+          <button id="btn-send-rest"
+            class="flex-shrink-0 flex items-center justify-center gap-2 px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors">
+            <i data-feather="send" class="w-4 h-4"></i>
             Send
           </button>
         </div>
 
-        <div class="sub-tabs" id="request-sub-tabs">
-          <button class="sub-tab-button active" data-tab="request-body-content">Body</button>
-          <button class="sub-tab-button" data-tab="request-params-content">Query Builder (Helper)</button>
+        <!-- Tabs cho Request Body/Helpers -->
+        <div id="request-sub-tabs" class="flex-shrink-0 flex border-b border-gray-200 px-4">
+          <button
+            class="sub-tab-button active py-3 px-4 text-sm font-medium text-gray-500 border-b-2 border-transparent -mb-px"
+            data-tab="request-body-content">Body</button>
+          <button
+            class="sub-tab-button py-3 px-4 text-sm font-medium text-gray-500 border-b-2 border-transparent -mb-px"
+            data-tab="request-params-content">Query Helpers</button>
         </div>
 
-        <div id="request-body-content" class="sub-tab-content active">
-          <textarea id="rest-body" placeholder='{&#10;  "group": "vip"&#10;}'></textarea>
-        </div>
-
-        <div id="request-params-content" class="sub-tab-content">
-          <small style="color: var(--text-secondary); display: block; margin-bottom: 15px;">
-            Dùng các nút trợ giúp này để tự động điền vào thanh Request ở trên.
-          </small>
-          <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
-            <input type="text" id="helper-id" placeholder="Document ID (e.g., c1)"
-              style="flex-grow: 1; background-color: #FFF; border-color: var(--code-border);">
-            <button id="btn-helper-get-by-id"
-              style="flex-shrink: 0; background-color: #EEE; color: #333; border: 1px solid var(--code-border); font-weight: 600;">Dùng
-              "Get by ID"</button>
+        <!-- Nội dung Tab Request (Cuộn) -->
+        <div class="flex-1 overflow-y-auto p-4">
+          <div id="request-body-content" class="sub-tab-content active">
+            <textarea id="rest-body" placeholder='{&#10;  "group": "vip"&#10;}'
+              class="w-full h-40 p-3 text-sm font-mono bg-gray-50 border border-gray-300 rounded-md resize-vertical focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"></textarea>
           </div>
-          <button id="btn-helper-search"
-            style="background-color: #EEE; color: #333; border: 1px solid var(--code-border); font-weight: 600;">Dùng
-            "_search" (cho Collection đã chọn)</button>
+          <div id="request-params-content" class="sub-tab-content hidden">
+            <p class="text-sm text-gray-600 mb-4">
+              Sử dụng các nút trợ giúp này để tự động điền vào thanh Request ở trên (yêu cầu chọn Collection trước).
+            </p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 class="font-semibold text-gray-800 mb-3">Thao tác theo ID</h3>
+                <input type="text" id="helper-id" placeholder="Document ID (e.g., c1)"
+                  class="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <div class="flex gap-2 mt-3">
+                  <button id="btn-helper-get-by-id"
+                    class="flex-1 px-3 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200">
+                    GET
+                  </button>
+                  <button id="btn-helper-update-by-id"
+                    class="flex-1 px-3 py-2 text-sm font-medium text-yellow-700 bg-yellow-100 rounded-md hover:bg-yellow-200">
+                    PUT
+                  </button>
+                  <button id="btn-helper-delete-by-id"
+                    class="flex-1 px-3 py-2 text-sm font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200">
+                    DELETE
+                  </button>
+                </div>
+              </div>
+              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 class="font-semibold text-gray-800 mb-3">Thao tác hàng loạt</h3>
+                <p class="text-xs text-gray-500 mb-3">
+                  Sử dụng các API `_search` hoặc `_insertMany` cho Collection đã chọn.
+                </p>
+                <div class="flex gap-2 mt-3">
+                  <button id="btn-helper-search"
+                    class="flex-1 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200">
+                    _search
+                  </button>
+                  <button id="btn-helper-insert-many"
+                    class="flex-1 px-3 py-2 text-sm font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200">
+                    _insertMany
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="response-panel">
-        <div class="response-status-bar">
-          <span>Status: <b id="response-status">--</b></span>
-          <span>Time: <b id="response-time">-- ms</b></span>
+      <!-- CỘT 3 - RESPONSE -->
+      <div id="response-panel"
+        class="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+
+        <!-- Thanh Status Response -->
+        <div class="flex-shrink-0 flex items-center gap-6 p-4 bg-gray-50 border-b border-gray-200">
+          <span class="text-sm">Status: <b id="response-status" class="font-bold">--</b></span>
+          <span class="text-sm">Time: <b id="response-time" class="font-bold">-- ms</b></span>
         </div>
 
-        <div class="sub-tabs" id="response-sub-tabs">
-          <button class="sub-tab-button active" data-tab="response-body-content">Body</button>
-          <button class="sub-tab-button" data-tab="response-headers-content">Headers</button>
+        <!-- Tabs cho Response Body/Headers -->
+        <div id="response-sub-tabs" class="flex-shrink-0 flex border-b border-gray-200 px-4">
+          <button
+            class="sub-tab-button active py-3 px-4 text-sm font-medium text-gray-500 border-b-2 border-transparent -mb-px"
+            data-tab="response-body-content">Body</button>
+          <button
+            class="sub-tab-button py-3 px-4 text-sm font-medium text-gray-500 border-b-2 border-transparent -mb-px"
+            data-tab="response-headers-content">Headers</button>
         </div>
 
-        <div id="response-body-content" class="sub-tab-content active response-body-wrapper">
-          <pre><code id="response-body-code" class="language-json">// Phản hồi API sẽ xuất hiện ở đây</code></pre>
+        <!-- Nội dung Tab Response (Cuộn) -->
+        <div class="flex-1 overflow-auto">
+          <div id="response-body-content" class="sub-tab-content active h-full">
+            <!-- ID `response-body-code` được CSS sử dụng để tô màu -->
+            <pre
+              class="h-full"><code id="response-body-code" class="language-json h-full">// Phản hồi API sẽ xuất hiện ở đây</code></pre>
+          </div>
+          <div id="response-headers-content"
+            class="sub-tab-content hidden h-full overflow-auto p-5 font-mono text-sm text-gray-700 whitespace-pre-wrap">
+            // Headers phản hồi sẽ xuất hiện ở đây
+          </div>
         </div>
 
-        <div id="response-headers-content" class="sub-tab-content" style="flex-grow: 1; overflow-y: auto;">
-          // Headers phản hồi sẽ xuất hiện ở đây
-        </div>
       </div>
-
     </main>
   </div>
 
+  <!-- 5. Tải Highlight.js (JS) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+
+  <!-- 6. JavaScript của Ứng dụng -->
   <script>
     feather.replace(); // Kích hoạt Feather Icons
-  </script>
 
-  <script>
-    // TOÀN BỘ JAVASCRIPT GIỮ NGUYÊN TỪ PHIÊN BẢN TRƯỚC
-    // NÓ VẪN HOẠT ĐỘNG HOÀN HẢO VỚI BỐ CỤC MỚI
     document.addEventListener('DOMContentLoaded', () => {
       // --- Tham chiếu DOM ---
       const collectionList = document.getElementById('collection-list');
+      const collectionSuggestions = document.getElementById('collection-suggestions');
       const btnRefreshCollections = document.getElementById('btn-refresh-collections');
       const btnCompact = document.getElementById('btn-compact');
 
-      const restMethod = document.getElementById('rest-method');
+      const methodToggleButton = document.getElementById('method-toggle-button');
+      const methodDropdown = document.getElementById('method-dropdown');
+      const methodOptions = document.querySelectorAll('.method-option');
+
       const restPath = document.getElementById('rest-path');
       const btnSendRest = document.getElementById('btn-send-rest');
-
       const restBody = document.getElementById('rest-body');
 
       const helperIdInput = document.getElementById('helper-id');
       const btnHelperGetById = document.getElementById('btn-helper-get-by-id');
       const btnHelperSearch = document.getElementById('btn-helper-search');
+      const btnHelperUpdateById = document.getElementById('btn-helper-update-by-id');
+      const btnHelperDeleteById = document.getElementById('btn-helper-delete-by-id');
+      const btnHelperInsertMany = document.getElementById('btn-helper-insert-many');
 
       const responseStatus = document.getElementById('response-status');
       const responseTime = document.getElementById('response-time');
       const responseBodyCode = document.getElementById('response-body-code');
       const responseHeadersContent = document.getElementById('response-headers-content');
 
+      const btnToggleSidebar = document.getElementById('btn-toggle-sidebar');
+      const sidebar = document.getElementById('sidebar');
+      const sidebarOverlay = document.getElementById('sidebar-overlay');
+
       let currentCollection = '';
+      let currentMethod = 'POST'; // Mặc định
 
       // --- Hàm Tiện ích ---
       async function apiCall(method, path, body = null, resultCodeElement = responseBodyCode) {
         resultCodeElement.textContent = 'Đang tải...';
-        resultCodeElement.className = 'language-json'; // Reset
+
+        // === FIX LỖI JS (v3.1) ===
+        // Dòng `resultCodeElement.className = 'language-json';` cũ đã bị xoá
+        // vì nó làm mất class `h-full` và `hljs`
+        // Giờ chúng ta chỉ cần đảm bảo class `language-json` và `h-full` có ở đó
+        resultCodeElement.className = 'language-json h-full';
+        // === KẾT THÚC FIX ===
+
         responseStatus.textContent = '--';
         responseTime.textContent = '-- ms';
-        responseStatus.className = '';
+        responseStatus.className = 'font-bold';
 
         const startTime = performance.now();
 
@@ -529,16 +361,21 @@
           const endTime = performance.now();
           const duration = (endTime - startTime).toFixed(0);
 
-          const data = await response.json();
+          let data;
+          try {
+            data = await response.json();
+          } catch (e) {
+            data = { error: "Phản hồi không phải là JSON hợp lệ." };
+          }
 
           responseStatus.textContent = `${response.status} ${response.statusText}`;
           responseTime.textContent = `${duration} ms`;
           if (response.status >= 200 && response.status < 300) {
-            responseStatus.classList.add('success');
+            responseStatus.classList.add('text-green-600');
           } else if (response.status >= 400) {
-            responseStatus.classList.add('error');
+            responseStatus.classList.add('text-red-600');
           } else {
-            responseStatus.classList.add('warn');
+            responseStatus.classList.add('text-yellow-600');
           }
 
           let headersText = '';
@@ -552,41 +389,46 @@
         } catch (err) {
           const endTime = performance.now();
           const duration = (endTime - startTime).toFixed(0);
-
           responseStatus.textContent = `CLIENT ERROR`;
-          responseStatus.classList.add('error');
+          responseStatus.classList.add('text-red-600');
           responseTime.textContent = `${duration} ms`;
-
           showResult(resultCodeElement, { error: err.message }, true);
         }
       }
 
       function showResult(codeElement, data, isError = false) {
         const jsonStr = JSON.stringify(data, null, 2);
-
         codeElement.textContent = jsonStr;
+
+        // Xoá class 'error' cũ (nếu có)
         codeElement.classList.remove('error');
-        codeElement.classList.add('language-json');
+        // Vẫn giữ 'language-json' và 'h-full'
+        codeElement.className = 'language-json h-full';
 
         if (isError) {
           codeElement.classList.add('error');
         } else {
+          // Chỉ gọi highlightElement khi không lỗi
+          // Nó sẽ tự động thêm class 'hljs' và các <span> tô màu
           hljs.highlightElement(codeElement);
         }
       }
 
       function setupSubTabs(containerId) {
         const tabContainer = document.getElementById(containerId);
-        const tabButtons = tabContainer.querySelectorAll('.sub-tab-button');
-        const tabContents = document.querySelectorAll(`[id^="${containerId.replace('-tabs', '')}-"]`);
+        const tabButtons = Array.from(tabContainer.children).filter(el => el.classList.contains('sub-tab-button'));
+        const contentPrefix = containerId.replace('-tabs', '');
+        const tabContents = document.querySelectorAll(`[id^="${contentPrefix}-"]`);
 
         tabButtons.forEach(button => {
           button.onclick = () => {
             tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabContents.forEach(content => content.classList.remove('active'));
-
+            tabContents.forEach(content => content.classList.add('hidden'));
             button.classList.add('active');
-            document.getElementById(button.dataset.tab).classList.add('active');
+            const contentToShow = document.getElementById(button.dataset.tab);
+            if (contentToShow) {
+              contentToShow.classList.remove('hidden');
+            }
           };
         });
       }
@@ -594,42 +436,97 @@
       setupSubTabs('request-sub-tabs');
       setupSubTabs('response-sub-tabs');
 
+      // --- Logic Responsive ---
+      function toggleSidebar() {
+        sidebar.classList.toggle('-translate-x-full');
+        sidebarOverlay.classList.toggle('hidden');
+      }
+      btnToggleSidebar.onclick = toggleSidebar;
+      sidebarOverlay.onclick = toggleSidebar;
+
+      // --- LOGIC MỚI: HTTP METHOD DROPDOWN ---
+      function setMethod(method) {
+        currentMethod = method;
+        methodToggleButton.dataset.method = method;
+        methodToggleButton.querySelector('span').textContent = method;
+        methodToggleButton.classList.remove('text-green-600', 'text-blue-600', 'text-yellow-600', 'text-red-600');
+
+        if (method === 'GET') methodToggleButton.classList.add('text-green-600');
+        else if (method === 'POST') methodToggleButton.classList.add('text-blue-600');
+        else if (method === 'PUT') methodToggleButton.classList.add('text-yellow-600');
+        else if (method === 'DELETE') methodToggleButton.classList.add('text-red-600');
+
+        methodDropdown.classList.add('hidden');
+      }
+
+      setMethod(currentMethod);
+
+      methodToggleButton.onclick = (e) => {
+        e.stopPropagation();
+        methodDropdown.classList.toggle('hidden');
+      };
+
+      methodOptions.forEach(option => {
+        option.onclick = (e) => {
+          e.preventDefault();
+          setMethod(e.currentTarget.dataset.method);
+        };
+      });
+
+      window.onclick = () => {
+        if (!methodDropdown.classList.contains('hidden')) {
+          methodDropdown.classList.add('hidden');
+        }
+      };
+
       // --- Logic chính ---
       async function loadCollections() {
         const response = await fetch('/_collections');
-        if (!response.ok) return;
+        if (!response.ok) {
+          collectionList.innerHTML = `<li class="p-3 text-sm text-red-600">(Lỗi tải collections)</li>`;
+          return;
+        }
         const data = await response.json();
 
         collectionList.innerHTML = '';
+        collectionSuggestions.innerHTML = '';
+
         if (data && data.length > 0) {
           data.sort().forEach(col => {
             const li = document.createElement('li');
-            li.innerHTML = `<i data-feather="database"></i> ${col}`;
+            li.className = "flex items-center gap-3 p-3 text-sm text-gray-700 hover:bg-gray-200 cursor-pointer rounded-md";
+            li.innerHTML = `<i data-feather="database" class="w-4 h-4 text-gray-500"></i> <span class="flex-1 truncate">${col}</span>`;
             li.dataset.collectionName = col;
-
             li.onclick = () => {
               document.querySelectorAll('#collection-list li').forEach(item => item.classList.remove('active'));
               li.classList.add('active');
               currentCollection = col;
-              restPath.value = restPath.value.replace('{collection}', currentCollection);
+              restPath.value = restPath.value.replace(/^{collection}/, currentCollection);
+              if (window.innerWidth < 768) {
+                toggleSidebar();
+              }
             };
             collectionList.appendChild(li);
+
+            const option = document.createElement('option');
+            option.value = col;
+            collectionSuggestions.appendChild(option);
           });
           feather.replace();
         } else {
-          collectionList.innerHTML = `<li style="color: var(--text-secondary); cursor: default;">(No collections)</li>`;
+          collectionList.innerHTML = `<li class="p-3 text-sm text-gray-500 italic">(No collections)</li>`;
         }
       }
 
       btnRefreshCollections.onclick = loadCollections;
 
       btnSendRest.onclick = () => {
-        const method = restMethod.value;
+        const method = currentMethod;
         const path = restPath.value;
         let body = restBody.value;
 
-        if (!path) {
-          alert('Vui lòng nhập đường dẫn (Path)');
+        if (!path || path === "/{collection}/_search" || path.startsWith('/{collection}')) {
+          alert('Vui lòng chọn một Collection từ sidebar trước.');
           return;
         }
 
@@ -639,44 +536,95 @@
           body = '{}';
         }
 
+        document.querySelector('#response-sub-tabs .sub-tab-button[data-tab="response-body-content"]').click();
         apiCall(method, path, body, responseBodyCode);
       };
 
       btnCompact.onclick = () => {
         if (confirm('Bạn có chắc muốn chạy nén (compaction) cơ sở dữ liệu không?')) {
-          restMethod.value = 'POST';
+          setMethod('POST');
           restPath.value = '/_compact';
           restBody.value = '';
+          document.querySelector('#response-sub-tabs .sub-tab-button[data-tab="response-body-content"]').click();
           apiCall('POST', '/_compact', null, responseBodyCode);
         }
       };
 
       // --- Logic các Nút Trợ giúp ---
-      btnHelperGetById.onclick = () => {
+      function checkCollection() {
         if (!currentCollection) {
           alert("Vui lòng chọn một Collection từ sidebar trước.");
-          return;
+          return false;
         }
+        return true;
+      }
+      function checkId() {
         const id = helperIdInput.value;
         if (!id) {
           alert("Vui lòng nhập một ID vào ô 'Document ID'.");
-          return;
+          return null;
         }
-        restMethod.value = 'GET';
+        return id;
+      }
+      function switchToBodyTab() {
+        document.querySelector('#request-sub-tabs .sub-tab-button[data-tab="request-body-content"]').click();
+      }
+
+      btnHelperGetById.onclick = () => {
+        if (!checkCollection()) return;
+        const id = checkId();
+        if (!id) return;
+
+        setMethod('GET');
         restPath.value = `/${currentCollection}/${id}`;
         restBody.value = '';
-        document.querySelector('.sub-tab-button[data-tab="request-body-content"]').click();
+        switchToBodyTab();
         btnSendRest.focus();
       };
 
-      btnHelperSearch.onclick = () => {
-        if (!currentCollection) {
-          alert("Vui lòng chọn một Collection từ sidebar trước.");
+      btnHelperUpdateById.onclick = () => {
+        if (!checkCollection()) return;
+        const id = checkId();
+        if (!id) return;
+
+        setMethod('PUT');
+        restPath.value = `/${currentCollection}/${id}`;
+        restBody.value = `{\n  "_id": "${id}",\n  "key": "value" \n}`;
+        switchToBodyTab();
+        restBody.focus();
+      };
+
+      btnHelperDeleteById.onclick = () => {
+        if (!checkCollection()) return;
+        const id = checkId();
+        if (!id) return;
+
+        if (!confirm(`Bạn có chắc muốn XÓA tài liệu '${id}' từ collection '${currentCollection}' không?`)) {
           return;
         }
-        restMethod.value = 'POST';
+
+        setMethod('DELETE');
+        restPath.value = `/${currentCollection}/${id}`;
+        restBody.value = '';
+        switchToBodyTab();
+        btnSendRest.click();
+      };
+
+      btnHelperSearch.onclick = () => {
+        if (!checkCollection()) return;
+        setMethod('POST');
         restPath.value = `/${currentCollection}/_search`;
-        document.querySelector('.sub-tab-button[data-tab="request-body-content"]').click();
+        restBody.value = `{\n  "group": "vip"\n}`;
+        switchToBodyTab();
+        restBody.focus();
+      };
+
+      btnHelperInsertMany.onclick = () => {
+        if (!checkCollection()) return;
+        setMethod('POST');
+        restPath.value = `/${currentCollection}/_insertMany`;
+        restBody.value = `[\n  {\n    "_id": "doc1",\n    "data": "value1"\n  },\n  {\n    "_id": "doc2",\n    "data": "value2"\n  }\n]`;
+        switchToBodyTab();
         restBody.focus();
       };
 
