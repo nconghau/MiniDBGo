@@ -50,11 +50,27 @@ func (dbf *DBFile) WriteEntry(key, value []byte) (int64, error) {
 	return pos, nil
 }
 
-func (dbf *DBFile) ReadAt(offset int64, kSize, vSize int32) ([]byte, []byte, error) {
-	buf := make([]byte, kSize+vSize)
-	if _, err := dbf.file.ReadAt(buf, offset+8); err != nil {
+func (dbf *DBFile) ReadEntryAt(offset int64) ([]byte, []byte, error) {
+	var kSize, vSize int32
+
+	// Đọc độ dài key và value (8 bytes đầu)
+	if _, err := dbf.file.Seek(offset, io.SeekStart); err != nil {
 		return nil, nil, err
 	}
+	if err := binary.Read(dbf.file, binary.LittleEndian, &kSize); err != nil {
+		return nil, nil, err
+	}
+	if err := binary.Read(dbf.file, binary.LittleEndian, &vSize); err != nil {
+		return nil, nil, err
+	}
+
+	// Tạo buffer và đọc key + value
+	buf := make([]byte, kSize+vSize)
+	if _, err := dbf.file.Read(buf); err != nil {
+		return nil, nil, err
+	}
+
+	// Cắt ra
 	return buf[:kSize], buf[kSize:], nil
 }
 

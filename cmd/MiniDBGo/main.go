@@ -20,7 +20,7 @@ func main() {
 	go startHttpServer(db, ":8080")
 	// --- KẾT THÚC THAY ĐỔI ---
 
-	fmt.Println(ColorGreen + "MiniDBGo CLI (Mongo-like, @Index21)" + ColorReset)
+	fmt.Println(ColorGreen + "MiniDBGo CLI" + ColorReset)
 	fmt.Println("Commands:")
 	fmt.Println(ColorCyan + " insertOne, findOne, findMany, updateOne, deleteOne, dumpAll, dumpDB, restoreDB, compact, exit" + ColorReset)
 	fmt.Println(ColorYellow + "\nExamples:" + ColorReset)

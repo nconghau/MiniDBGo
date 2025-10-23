@@ -14,7 +14,7 @@ type BloomFilter struct {
 func NewBloomFilter(n uint32, k int) *BloomFilter {
 	return &BloomFilter{
 		bits: make([]bool, n),
-		k:    k,
+		k:  	  k,
 		n:    n,
 	}
 }
