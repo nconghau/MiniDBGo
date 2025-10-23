@@ -21,37 +21,21 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
 
-    /* === YÊU CẦU 2: TÔ MÀU JSON (FIX v3.1) === */
-    /* Tăng tối đa độ đặc hiệu (specificity) bằng cách dùng ID.
-       Điều này đảm bảo các quy tắc bên dưới sẽ THẮNG file github.min.css
-    */
+    /* Giữ palette Postman-like (keys, strings, numbers, literals) - đã có, thêm rule error */
     pre code#response-body-code.hljs {
       padding: 1.25rem;
       background-color: #FFFFFF !important;
       color: #242424 !important;
       font-size: 14px;
       line-height: 1.7;
+      white-space: pre-wrap;
     }
 
-    pre code#response-body-code.hljs .hljs-attr,
-    pre code#response-body-code.hljs .hljs-property {
-      color: #9b239b !important;
-      /* Postman: Tím hồng */
-    }
-
-    pre code#response-body-code.hljs .hljs-string {
-      color: #DD4A11 !important;
-      /* Postman: Cam */
-    }
-
-    pre code#response-body-code.hljs .hljs-number {
-      color: #C41A70 !important;
-      /* Postman: Đỏ hồng */
-    }
-
-    pre code#response-body-code.hljs .hljs-literal {
-      color: #0066CC !important;
-      /* Postman: Xanh dương */
+    /* Error marker: keep hljs colors but add subtle error background/border */
+    pre code#response-body-code.error.hljs {
+      /* don't override hljs colors — only add indicator */
+      background-color: #fff5f5 !important;
+      box-shadow: inset 0 0 0 1px rgba(217, 43, 43, 0.06);
     }
 
     /* === KẾT THÚC FIX TÔ MÀU === */
@@ -398,21 +382,36 @@
 
       function showResult(codeElement, data, isError = false) {
         const jsonStr = JSON.stringify(data, null, 2);
-        codeElement.textContent = jsonStr;
 
-        // Xoá class 'error' cũ (nếu có)
-        codeElement.classList.remove('error');
-        // Vẫn giữ 'language-json' và 'h-full'
+        // Set raw text (safe) then highlight
+        codeElement.textContent = jsonStr;
+        // Keep consistent classes
         codeElement.className = 'language-json h-full';
+
+        // Always highlight so colors are applied like Postman regardless of status
+        try {
+          hljs.highlightElement(codeElement);
+        } catch (e) {
+          // fallback: do nothing (still displays raw text)
+          console.warn('hljs failed', e);
+        }
+
+        // Visual cues for error vs success (but do not remove syntax coloring)
+        codeElement.classList.remove('error');
+        codeElement.style.border = ''; // reset
 
         if (isError) {
           codeElement.classList.add('error');
+          // subtle red-left border to indicate error (keeps colors intact)
+          codeElement.style.borderLeft = '4px solid #D92B2B';
+          // optional soft background for error responses
+          codeElement.style.backgroundColor = '#FFF5F5';
         } else {
-          // Chỉ gọi highlightElement khi không lỗi
-          // Nó sẽ tự động thêm class 'hljs' và các <span> tô màu
-          hljs.highlightElement(codeElement);
+          // normal background
+          codeElement.style.backgroundColor = '';
         }
       }
+
 
       function setupSubTabs(containerId) {
         const tabContainer = document.getElementById(containerId);

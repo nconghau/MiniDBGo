@@ -281,12 +281,28 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 
 // --- Các hàm tiện ích HTTP ---
 
+// writeJSON writes pretty-printed JSON (indent) and the status code.
+// Using MarshalIndent ensures client receives formatted JSON suitable for syntax highlighting.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+
+	// Try to marshal with indent for nicer presentation in UI/clients.
+	if b, err := json.MarshalIndent(v, "", "  "); err == nil {
+		_, _ = w.Write(b)
+		return
+	}
+
+	// fallback: encode normally
+	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeError returns an error envelope with HTTP status and message.
+// Provides both "error" and "status" fields so clients can present consistent UI.
 func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
+	payload := map[string]interface{}{
+		"error":  message,
+		"status": status,
+	}
+	writeJSON(w, status, payload)
 }
