@@ -38,7 +38,7 @@ RUN mkdir -p /app/data/MiniDBGo
 ENV PATH="/usr/local/bin:$PATH"
 
 # Optional: expose nothing (CLI app) or port if needed in future
-# EXPOSE 8080
+# EXPOSE 6866
 
 # Run as non-root user for security
 RUN adduser -D minidbuser

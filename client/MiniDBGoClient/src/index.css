@@ -1,3 +1,63 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@import 'highlight.js/styles/atom-one-light.css';
+
+/* Custom styles ported from the original ui.html */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+}
+
+pre code#response-body-code.hljs {
+  padding: 1.25rem;
+  background-color: #ffffff !important;
+  color: #242424 !important;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+pre code#response-body-code.error.hljs {
+  background-color: #fff5f5 !important;
+  box-shadow: inset 0 0 0 1px rgba(217, 43, 43, 0.06);
+}
+
+pre code.error {
+  color: #d92b2b;
+  font-weight: bold;
+  white-space: pre-wrap;
+}
+
+.method-btn[data-method='GET'] {
+  color: #008a00;
+  font-weight: 600;
+}
+.method-btn[data-method='POST'] {
+  color: #0066cc;
+  font-weight: 600;
+}
+.method-btn[data-method='PUT'] {
+  color: #e58d00;
+  font-weight: 600;
+}
+.method-btn[data-method='DELETE'] {
+  color: #d92b2b;
+  font-weight: 600;
+}
+
+.sub-tab-button.active {
+  color: #2563eb;
+  border-bottom-color: #2563eb;
+}
+
+#collection-list li.active {
+  background-color: #eff6ff;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+#collection-list li.active i {
+  color: #2563eb;
+}

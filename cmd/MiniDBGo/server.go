@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"            // <-- Thêm import này
-	"path/filepath" // <-- Thêm import này
 	"strings"
 
 	"github.com/nconghau/MiniDBGo/internal/lsm"
@@ -22,21 +20,22 @@ func startHttpServer(db *lsm.LSMEngine, addr string) {
 	s := &Server{db: db}
 	mux := http.NewServeMux()
 
-	// --- BẮT ĐẦU THAY ĐỔI ---
-
-	// Endpoint để phục vụ giao diện UI (file ui.html)
-	mux.HandleFunc("/ui", s.handleUI)
+	// --- THAY ĐỔI: API Endpoints với prefix /api ---
 
 	// Endpoint API mới để liệt kê các collection
-	mux.HandleFunc("/_collections", s.handleGetCollections)
+	mux.HandleFunc("/api/_collections", s.handleGetCollections)
 
-	// API cho các thao tác dữ liệu
-	mux.HandleFunc("/", s.handleRoutes)
+	// Endpoint API để compact
+	mux.HandleFunc("/api/_compact", s.handleCompact)
 
-	// --- KẾT THÚC THAY ĐỔI ---
+	// API cho các thao tác dữ liệu (sẽ được xử lý bởi handleApiRoutes)
+	// /api/{collection}/{id}
+	// /api/{collection}/_search
+	// /api/{collection}/_insertMany
+	mux.HandleFunc("/api/", s.handleApiRoutes)
 
 	fmt.Printf(ColorGreen+"[HTTP] Máy chủ API đang chạy trên %s"+ColorReset+"\n", addr)
-	fmt.Printf(ColorGreen + "[HTTP] Giao diện UI có tại: http://localhost:8080/ui" + ColorReset + "\n") // Thêm dòng này
+	// fmt.Printf(ColorGreen + "[HTTP] Giao diện UI có tại: http://localhost:6866/" + ColorReset + "\n") // Đã cập nhật
 
 	go func() {
 		if err := http.ListenAndServe(addr, mux); err != nil {
@@ -45,31 +44,8 @@ func startHttpServer(db *lsm.LSMEngine, addr string) {
 	}()
 }
 
-// --- HANDLER MỚI: Phục vụ tệp UI ---
-func (s *Server) handleUI(w http.ResponseWriter, r *http.Request) {
-	// Giả sử ui.html nằm cùng thư mục với tệp thực thi (hoặc thư mục cmd/MiniDBGo)
-	// Bạn có thể cần điều chỉnh đường dẫn này
-	path := filepath.Join("cmd", "MiniDBGo", "ui.html")
-
-	// Đọc tệp
-	content, err := os.ReadFile(path)
-	if err != nil {
-		// Thử một đường dẫn khác nếu chạy từ thư mục gốc
-		path = "ui.html" // (Nếu bạn đặt ui.html ở thư mục gốc)
-		content, err = os.ReadFile(path)
-		if err != nil {
-			http.Error(w, "Không thể tìm thấy tệp ui.html", http.StatusNotFound)
-			return
-		}
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
-}
-
-// --- HANDLER MỚI: Lấy danh sách collection ---
 func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
-	keys, err := s.db.IterKeys() // [cite: 34]
+	keys, err := s.db.IterKeys()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Không thể đọc keys")
 		return
@@ -91,23 +67,19 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cols)
 }
 
-// handleRoutes phân tích URL và điều hướng đến handler thích hợp
-func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
+	// --- THAY ĐỔI: Loại bỏ prefix /api/ khỏi URL path ---
+	path := strings.TrimPrefix(r.URL.Path, "/api")
+	parts := strings.Split(strings.Trim(path, "/"), "/")
 
 	if len(parts) == 0 || parts[0] == "" {
-		// Chuyển hướng trang gốc đến /ui
-		http.Redirect(w, r, "/ui", http.StatusFound)
+		writeError(w, http.StatusNotFound, "Đường dẫn API không hợp lệ")
 		return
 	}
 
-	// Điều hướng dựa trên số lượng phần tử và phương thức
 	switch {
-	// POST /_compact
-	case r.Method == "POST" && len(parts) == 1 && parts[0] == "_compact":
-		s.handleCompact(w, r)
 
-		// POST /{collection}/_insertMany
+	// POST /{collection}/_insertMany
 	case r.Method == "POST" && len(parts) == 2 && parts[1] == "_insertMany":
 		s.handleInsertMany(w, r, parts[0]) // parts[0] là collection
 
@@ -132,22 +104,15 @@ func (s *Server) handleRoutes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "Phương thức không được hỗ trợ")
 		}
 	default:
-		// Bỏ qua các request mà chúng ta không xử lý (vd: /favicon.ico)
-		// thay vì trả về lỗi 404
 		if !strings.HasSuffix(parts[0], ".ico") {
-			writeError(w, http.StatusNotFound, "Đường dẫn không hợp lệ")
+			writeError(w, http.StatusNotFound, "Đường dẫn API không hợp lệ")
 		}
 	}
 }
 
-// (Các hàm handler còn lại: handleUpdateDocument, handleGetDocument,
-// handleDeleteDocument, handleFindMany, handleCompact, writeJSON, writeError
-// ... giữ nguyên như ở bước trước ...)
-
-// handleInsertMany xử lý POST /{collection}/_insertMany
+// handleInsertMany (Giữ nguyên)
 func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var docs []map[string]interface{}
-	// [CITE: 11] giải mã một mảng JSON từ body
 	if err := json.NewDecoder(r.Body).Decode(&docs); err != nil {
 		writeError(w, http.StatusBadRequest, "Nội dung không phải là một mảng JSON hợp lệ")
 		return
@@ -161,7 +126,6 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 
 	insertedCount := 0
 	for i, doc := range docs {
-		// [CITE: 25] Lấy _id từ mỗi tài liệu
 		id, ok := doc["_id"].(string)
 		if !ok {
 			msg := fmt.Sprintf("Tài liệu tại chỉ mục %d thiếu trường _id (kiểu string)", i)
@@ -169,9 +133,7 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 			return
 		}
 
-		// [CITE: 26] Tạo key bằng cách ghép collection:id
 		key := []byte(collection + ":" + id)
-		// Phải marshal lại từng doc một
 		raw, err := json.Marshal(doc)
 		if err != nil {
 			msg := fmt.Sprintf("Không thể marshal tài liệu tại chỉ mục %d: %v", i, err)
@@ -179,11 +141,10 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 			return
 		}
 
-		// [CITE: 9] Gọi hàm Put của database
 		if err := s.db.Put(key, raw); err != nil {
 			msg := fmt.Sprintf("Lỗi khi chèn tài liệu %s: %v", id, err)
 			writeError(w, http.StatusInternalServerError, msg)
-			return // Dừng lại khi gặp lỗi đầu tiên
+			return
 		}
 		insertedCount++
 	}
@@ -191,7 +152,6 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "insertedCount": insertedCount})
 }
 
-// handleUpdateDocument xử lý PUT /{collection}/{id}
 func (s *Server) handleUpdateDocument(w http.ResponseWriter, r *http.Request, key []byte) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -213,7 +173,6 @@ func (s *Server) handleUpdateDocument(w http.ResponseWriter, r *http.Request, ke
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "key": string(key)})
 }
 
-// handleGetDocument xử lý GET /{collection}/{id}
 func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request, key []byte) {
 	val, err := s.db.Get(key)
 	if err != nil {
@@ -225,7 +184,6 @@ func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request, key [
 	w.Write(val)
 }
 
-// handleDeleteDocument xử lý DELETE /{collection}/{id}
 func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request, key []byte) {
 	if err := s.db.Delete(key); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -234,7 +192,6 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request, ke
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "key": string(key)})
 }
 
-// handleFindMany xử lý POST /{collection}/_search
 func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var filter map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
@@ -270,7 +227,6 @@ func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collecti
 	writeJSON(w, http.StatusOK, results)
 }
 
-// handleCompact xử lý POST /_compact
 func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 	if err := s.db.Compact(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -279,26 +235,16 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "compaction complete"})
 }
 
-// --- Các hàm tiện ích HTTP ---
-
-// writeJSON writes pretty-printed JSON (indent) and the status code.
-// Using MarshalIndent ensures client receives formatted JSON suitable for syntax highlighting.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-
-	// Try to marshal with indent for nicer presentation in UI/clients.
 	if b, err := json.MarshalIndent(v, "", "  "); err == nil {
 		_, _ = w.Write(b)
 		return
 	}
-
-	// fallback: encode normally
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeError returns an error envelope with HTTP status and message.
-// Provides both "error" and "status" fields so clients can present consistent UI.
 func writeError(w http.ResponseWriter, status int, message string) {
 	payload := map[string]interface{}{
 		"error":  message,

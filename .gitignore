@@ -1,3 +1,4 @@
+# Dependencies DB
 *.sh
 *.txt
 *.log
@@ -5,18 +6,39 @@
 *.log
 *.sst
 
+# Dependencies FE
+node_modules/
+.pnp
+.pnp.js
 
+# Testing
+coverage/
 
-.DS_Store
-node_modules
-.turbo
-dist
-dist-ssr
-*.local
-.cache
-server/dist
-public/dist
+# Production
 dist/
-vite.config.*.timestamp-*.mjs
-*.eslintcache
-.qodo
+build/
+
+# Misc
+.DS_Store
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Rsbuild
+.rsbuild/
+.temp/

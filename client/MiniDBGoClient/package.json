@@ -1,26 +1,33 @@
 {
-  "name": "minidbgo-client",
+  "name": "MiniDBGoClient",
   "version": "1.0.0",
-  "private": true,
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "rsbuild dev --open",
+    "build": "rsbuild build --config rsbuild.config.ts",
+    "start": "serve -s dist -l tcp://0.0.0.0:$PORT -n",
+    "preview": "serve -s dist --ssl-cert ./cert.pem --ssl-key ./key.pem -l 3000"
   },
   "dependencies": {
-    "axios": "^1.7.2",
-    "lucide-react": "^0.546.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "@rsbuild/plugin-svgr": "^1.0.7",
+    "clsx": "^1.2.1",
+    "feather-icons": "^4.29.0",
+    "highlight.js": "^11.9.0",
+    "lucide-react": "^0.263.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@types/react": "^18.3.2",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^5.0.4",
-    "autoprefixer": "^10.4.18",
-    "postcss": "^8.4.35",
-    "tailwindcss": "^3.4.3",
-    "typescript": "^5.9.3",
-    "vite": "^7.1.12"
+    "@rsbuild/core": "^1.2.14",
+    "@rsbuild/plugin-node-polyfill": "^1.3.0",
+    "@rsbuild/plugin-react": "^1.1.1",
+    "@rsbuild/plugin-sass": "^1.2.2",
+    "@types/highlight.js": "^10.1.0",
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0"
   }
 }
