@@ -4,76 +4,54 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log" // Use standard logger instead of fmt for production
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
-// Server struct để giữ đối tượng DB
+// Server struct holds the DB instance
 type Server struct {
 	db *lsm.LSMEngine
 }
 
-// startHttpServer khởi chạy máy chủ web trong một goroutine
+// startHttpServer starts the web server in a goroutine
 func startHttpServer(db *lsm.LSMEngine, addr string) {
 	s := &Server{db: db}
 	mux := http.NewServeMux()
 
-	// --- THAY ĐỔI: API Endpoints với prefix /api ---
+	// --- API Endpoints with /api prefix ---
 
-	// Endpoint API mới để liệt kê các collection
+	// New API endpoint to list collections
 	mux.HandleFunc("/api/_collections", s.handleGetCollections)
 
-	// Endpoint API để compact
+	// API endpoint for compaction
 	mux.HandleFunc("/api/_compact", s.handleCompact)
 
-	// API cho các thao tác dữ liệu (sẽ được xử lý bởi handleApiRoutes)
+	// API for data operations (handled by handleApiRoutes)
 	// /api/{collection}/{id}
 	// /api/{collection}/_search
 	// /api/{collection}/_insertMany
 	mux.HandleFunc("/api/", s.handleApiRoutes)
 
-	fmt.Printf(ColorGreen+"[HTTP] Máy chủ API đang chạy trên %s"+ColorReset+"\n", addr)
-	// fmt.Printf(ColorGreen + "[HTTP] Giao diện UI có tại: http://localhost:6866/" + ColorReset + "\n") // Đã cập nhật
+	log.Printf("[HTTP] API server running on %s\n", addr)
 
 	go func() {
 		if err := http.ListenAndServe(addr, mux); err != nil {
-			fmt.Printf(ColorRed+"[HTTP] Lỗi máy chủ: %v"+ColorReset+"\n", err)
+			log.Printf("[HTTP] ERROR: Server failed: %v\n", err)
 		}
 	}()
 }
 
-func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
-	keys, err := s.db.IterKeys()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Không thể đọc keys")
-		return
-	}
-	// Sử dụng map để đảm bảo tên collection là duy nhất
-	colSet := map[string]struct{}{}
-	for _, k := range keys {
-		if idx := strings.Index(k, ":"); idx >= 0 {
-			colSet[k[:idx]] = struct{}{}
-		}
-	}
-
-	// Chuyển map keys thành một slice
-	cols := make([]string, 0, len(colSet))
-	for col := range colSet {
-		cols = append(cols, col)
-	}
-
-	writeJSON(w, http.StatusOK, cols)
-}
-
 func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
-	// --- THAY ĐỔI: Loại bỏ prefix /api/ khỏi URL path ---
+	// Trim the /api prefix from the URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 
 	if len(parts) == 0 || parts[0] == "" {
-		writeError(w, http.StatusNotFound, "Đường dẫn API không hợp lệ")
+		writeError(w, http.StatusNotFound, "Invalid API path")
 		return
 	}
 
@@ -81,13 +59,13 @@ func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
 
 	// POST /{collection}/_insertMany
 	case r.Method == "POST" && len(parts) == 2 && parts[1] == "_insertMany":
-		s.handleInsertMany(w, r, parts[0]) // parts[0] là collection
+		s.handleInsertMany(w, r, parts[0]) // parts[0] is the collection name
 
 	// POST /{collection}/_search
 	case r.Method == "POST" && len(parts) == 2 && parts[1] == "_search":
-		s.handleFindMany(w, r, parts[0]) // parts[0] là collection
+		s.handleFindMany(w, r, parts[0]) // parts[0] is the collection name
 
-	// Xử lý tài liệu: /{collection}/{id}
+	// Handle document routes: /{collection}/{id}
 	case len(parts) == 2:
 		collection := parts[0]
 		id := parts[1]
@@ -101,20 +79,71 @@ func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
 		case "DELETE":
 			s.handleDeleteDocument(w, r, key)
 		default:
-			writeError(w, http.StatusMethodNotAllowed, "Phương thức không được hỗ trợ")
+			writeError(w, http.StatusMethodNotAllowed, "Method not supported")
 		}
 	default:
+		// Ignore favicon requests that might slip through
 		if !strings.HasSuffix(parts[0], ".ico") {
-			writeError(w, http.StatusNotFound, "Đường dẫn API không hợp lệ")
+			writeError(w, http.StatusNotFound, "Invalid API path")
 		}
 	}
 }
 
-// handleInsertMany (Giữ nguyên)
+type CollectionInfo struct {
+	Name     string `json:"name"`
+	DocCount int    `json:"docCount"`
+	ByteSize int64  `json:"byteSize"`
+}
+
+func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.db.IterKeys()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to read keys")
+		return
+	}
+
+	// Sử dụng map để đếm và tính tổng dung lượng
+	colCounts := make(map[string]int)
+	colSizes := make(map[string]int64) // Dùng int64 cho kích thước (bytes)
+
+	for _, k := range keys {
+		if idx := strings.Index(k, ":"); idx >= 0 {
+			colName := k[:idx]
+
+			// 1. Đếm số lượng (như cũ)
+			colCounts[colName]++
+
+			// 2. Lấy value và tính dung lượng (PHẦN GÂY CHẬM)
+			val, err := s.db.Get([]byte(k))
+			if err == nil {
+				colSizes[colName] += int64(len(val))
+			}
+		}
+	}
+
+	// Chuyển map thành một slice các struct CollectionInfo
+	colsInfo := make([]CollectionInfo, 0, len(colCounts))
+	for colName, count := range colCounts {
+		colsInfo = append(colsInfo, CollectionInfo{
+			Name:     colName,
+			DocCount: count,
+			ByteSize: colSizes[colName], // Lấy tổng dung lượng từ map
+		})
+	}
+
+	// Sắp xếp theo tên để API trả về nhất quán
+	sort.Slice(colsInfo, func(i, j int) bool {
+		return colsInfo[i].Name < colsInfo[j].Name
+	})
+
+	writeJSON(w, http.StatusOK, colsInfo)
+}
+
+// handleInsertMany inserts multiple documents into a collection
 func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var docs []map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&docs); err != nil {
-		writeError(w, http.StatusBadRequest, "Nội dung không phải là một mảng JSON hợp lệ")
+		writeError(w, http.StatusBadRequest, "Request body is not a valid JSON array")
 		return
 	}
 	defer r.Body.Close()
@@ -128,7 +157,7 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 	for i, doc := range docs {
 		id, ok := doc["_id"].(string)
 		if !ok {
-			msg := fmt.Sprintf("Tài liệu tại chỉ mục %d thiếu trường _id (kiểu string)", i)
+			msg := fmt.Sprintf("Document at index %d is missing required _id (string) field", i)
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
@@ -136,13 +165,13 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 		key := []byte(collection + ":" + id)
 		raw, err := json.Marshal(doc)
 		if err != nil {
-			msg := fmt.Sprintf("Không thể marshal tài liệu tại chỉ mục %d: %v", i, err)
+			msg := fmt.Sprintf("Failed to marshal document at index %d: %v", i, err)
 			writeError(w, http.StatusInternalServerError, msg)
 			return
 		}
 
 		if err := s.db.Put(key, raw); err != nil {
-			msg := fmt.Sprintf("Lỗi khi chèn tài liệu %s: %v", id, err)
+			msg := fmt.Sprintf("Error inserting document %s: %v", id, err)
 			writeError(w, http.StatusInternalServerError, msg)
 			return
 		}
@@ -155,14 +184,14 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 func (s *Server) handleUpdateDocument(w http.ResponseWriter, r *http.Request, key []byte) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "Không thể đọc nội dung request")
+		writeError(w, http.StatusBadRequest, "Failed to read request body")
 		return
 	}
 	defer r.Body.Close()
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		writeError(w, http.StatusBadRequest, "Nội dung không phải là JSON hợp lệ")
+		writeError(w, http.StatusBadRequest, "Request body is not valid JSON")
 		return
 	}
 
@@ -176,7 +205,7 @@ func (s *Server) handleUpdateDocument(w http.ResponseWriter, r *http.Request, ke
 func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request, key []byte) {
 	val, err := s.db.Get(key)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "Không tìm thấy khóa")
+		writeError(w, http.StatusNotFound, "Key not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -195,7 +224,7 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request, ke
 func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var filter map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
-		writeError(w, http.StatusBadRequest, "JSON filter không hợp lệ")
+		writeError(w, http.StatusBadRequest, "Invalid JSON filter")
 		return
 	}
 	defer r.Body.Close()
@@ -211,12 +240,12 @@ func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collecti
 
 		val, err := s.db.Get([]byte(k))
 		if err != nil {
-			continue
+			continue // Document might have been deleted concurrently
 		}
 
 		var doc map[string]interface{}
 		if err := json.Unmarshal(val, &doc); err != nil {
-			continue
+			continue // Data corruption? Skip this entry.
 		}
 
 		if matchFilter(doc, filter) {
@@ -235,16 +264,20 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "compaction complete"})
 }
 
+// writeJSON streams a JSON response.
+// Using json.NewEncoder is more memory-efficient for large responses
+// than json.Marshal, as it avoids buffering the entire response in memory.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	if b, err := json.MarshalIndent(v, "", "  "); err == nil {
-		_, _ = w.Write(b)
-		return
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		// The header is already sent, so we can't send a clean error payload.
+		// We can only log the error.
+		log.Printf("[HTTP] ERROR: Failed to encode JSON response: %v", err)
 	}
-	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeError formats and sends a standard JSON error response.
 func writeError(w http.ResponseWriter, status int, message string) {
 	payload := map[string]interface{}{
 		"error":  message,
