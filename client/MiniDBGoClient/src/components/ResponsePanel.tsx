@@ -140,7 +140,7 @@ export default function ResponsePanel({
             <div className="json-view-container p-4">
               <ReactJson
                 src={response.headers}
-                collapsed={true}
+                collapsed={false}
                 displayDataTypes={false}
                 name={false}
               />

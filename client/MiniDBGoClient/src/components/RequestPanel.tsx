@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Send, Plus, Trash2, Combine, Eraser, ChevronDown } from 'lucide-react';
+import { Send, Plus, Trash2, Combine, Eraser, ChevronDown, Wand2 } from 'lucide-react';
 import Editor from 'react-simple-code-editor';
 import { highlight, languages } from 'prismjs';
 import 'prismjs/components/prism-json';
@@ -321,14 +321,14 @@ export default function RequestPanel({
         >
           {/* --- CẬP NHẬT: Editor JSON --- */}
           <div>
-            <div className="flex justify-between items-center mb-2">
+            <div className="flex justify-between items-center mb-2 px-1">
               <h3 className="text-sm font-semibold text-gray-700">Request Body (JSON)</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleFormatJson}
                   className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium text-primary-600 hover:bg-primary-50 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500"
                 >
-                  <Combine className="w-3 h-3" />
+                  <Wand2 className="w-3 h-3" />
                   Format
                 </button>
                 <button
@@ -343,8 +343,8 @@ export default function RequestPanel({
 
             {/* --- CẬP NHẬT: Logic border (dùng slate) --- */}
             <div className={`editor-container w-full h-64 bg-slate-50 rounded-md overflow-hidden transition-colors ${jsonError
-                ? 'border-2 border-red-500' // Lỗi: border đỏ dày
-                : 'border border-slate-300 focus-within:border-primary-500 focus-within:border-2' // Mặc định: border xám, Focus: border tím
+              ? 'border-2 border-red-500' // Lỗi: border đỏ dày
+              : 'border border-slate-300 focus-within:border-primary-500 focus-within:border-2' // Mặc định: border xám, Focus: border tím
               }`}>
               <Editor
                 value={body}
