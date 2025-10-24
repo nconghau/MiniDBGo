@@ -1,11 +1,11 @@
 
 -----
 
-# MiniDBGo: A Lightweight, Mongo-like Database in Go
+# MiniDBGo: A Lightweight Database in Go
 
 ## Overview
 
-MiniDBGo is a lightweight, educational database engine written in Go, inspired by MongoDB. This project is designed as a learning resource to understand core database internals such as CRUD operations, durability through Write-Ahead Logs (WAL), and the storage architecture of a Log-Structured Merge-Tree (LSM-Tree).
+MiniDBGo is a lightweight, educational database engine written in Go. This project is designed as a learning resource to understand core database internals such as CRUD operations, durability through Write-Ahead Logs (WAL), and the storage architecture of a Log-Structured Merge-Tree (LSM-Tree).
 
 ## Core Architecture: How It Works (LSM-Tree)
 
@@ -59,7 +59,7 @@ Over time, many small SSTable files can be created. The `compact` command trigge
 
 ## ✨ Features
 
-  * **Mongo-like CLI**: An interactive command-line interface with familiar commands.
+  * **CLI**: An interactive command-line interface with familiar commands.
       * `insertOne`, `findOne`, `findMany`
       * `updateOne` (with `$set` operator), `deleteOne`
       * `dumpDB`, `restoreDB`, `compact`
@@ -70,15 +70,60 @@ Over time, many small SSTable files can be created. The `compact` command trigge
 ## 🚀 Quick Start
 
 ```bash
-# Terminal 1
+### Terminal 1 ###
 git clone https://github.com/nconghau/MiniDBGo
 
 cd MiniDBGo
 go run ./cmd/MiniDBGo
 
-# Terminal 2
+### Terminal 2 ###
 cd client/MiniDBGoClient
 yarn && yarn dev
+```
+
+```bash
+### CLI Usage ###
+Commands:
+insertOne, findOne, findMany, updateOne, deleteOne, dumpAll
+
+Examples (using 'products' collection):
+insertOne products {"_id":"p1","name":"Laptop","category":"electronics","price":1200}
+insertMany products [{"_id":"p1","name":"Laptop"}, {"_id":"p2","name":"Mouse"}]
+findOne products {"_id":"p1"}
+findMany products {"category":"electronics"}
+findMany products {"price":{"$gt":1000}}
+updateOne products {"_id":"p1"} {"$set":{"name":"Laptop Pro"}}
+deleteOne products {"_id":"p1"}
+dumpAll products
+
+### DB Operations: ###
+dumpDB          # Export all collections to a file
+restoreDB <file.json> # Restore from a dump file
+compact         # Reclaim space from old data
+exit
+
+### REST API Examples (CURL): ###
+
+# Get all collections
+curl http://localhost:6866/api/_collections
+
+# Get 1 document
+curl http://localhost:6866/api/products/p1
+
+# Create/Update 1 document
+curl -X PUT -d '{"_id":"p1","name":"Laptop Pro","price":1500}' http://localhost:6866/api/products/p1
+
+# Search documents
+curl -X POST -d '{"category":"electronics"}' http://localhost:6866/api/products/_search
+
+# Insert many documents
+curl -X POST -d '[{"_id":"p2","name":"Mouse"},{"_id":"p3","name":"Keyboard"}]' http://localhost:6866/api/products/_insertMany
+
+# Delete 1 document
+curl -X DELETE http://localhost:6866/api/products/p1
+
+# Run compaction
+curl -X POST http://localhost:6866/api/_compact
 ```
 
 ## ⚠️ Disclaimer
