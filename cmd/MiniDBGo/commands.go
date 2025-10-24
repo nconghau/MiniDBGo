@@ -50,7 +50,6 @@ func handleInsertMany(db *lsm.LSMEngine, rest string) {
 	docStr := parts[1]
 
 	var docs []map[string]interface{}
-	// [cite: 25]
 	if err := json.Unmarshal([]byte(docStr), &docs); err != nil {
 		fmt.Println("Invalid JSON Array:", err)
 		return

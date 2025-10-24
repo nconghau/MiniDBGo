@@ -2,32 +2,35 @@ import React, { useState } from 'react';
 import Sidebar from './components/Sidebar';
 import RequestPanel from './components/RequestPanel';
 import ResponsePanel from './components/ResponsePanel';
-import { fetchApi, ResponseData } from './data/api';
+import { fetchApi, ResponseData, KeyValueItem } from './data/api';
+import { Menu, Database } from 'lucide-react';
 
 export default function App() {
-  // State được nâng lên App
   const [activeCollection, setActiveCollection] = useState<string | null>(null);
   const [response, setResponse] = useState<ResponseData | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Xử lý gửi request từ RequestPanel
+  // --- SỬA LỖI LOGIC: Xóa tiền tố /api/ ---
   const handleSendRequest = async (
     method: string,
-    path: string,
+    path: string, // 'path' bây giờ là /products/_search
     body: string | null,
+    params: KeyValueItem[],
+    headers: KeyValueItem[],
   ) => {
     setLoading(true);
-    // Đảm bảo path luôn bắt đầu bằng /api
-    const apiPath = path.startsWith('/api') ? path : `/api${path}`;
-    const res = await fetchApi(method, apiPath, body);
+    // 'fetchApi' SẼ TỰ ĐỘNG THÊM /api/
+    const res = await fetchApi(method, path, body, params, headers);
     setResponse(res);
     setLoading(false);
   };
+  // --- KẾT THÚC SỬA LỖI ---
 
   // Xử lý nút Compact DB
   const handleCompact = async () => {
     setLoading(true);
-    const res = await fetchApi('POST', '/api/_compact', null);
+    // Đường dẫn /_compact không cần params/headers
+    const res = await fetchApi('POST', '/_compact', null, [], []);
     setResponse(res);
     setLoading(false);
   };
@@ -41,24 +44,23 @@ export default function App() {
               id="btn-toggle-sidebar"
               className="md:hidden p-1 text-gray-600 hover:text-gray-900"
             >
-              <i data-feather="menu" className="w-6 h-6" />
+              <Menu className="w-6 h-6" />
             </button>
             <h1 className="text-xl font-bold text-gray-800">MiniDBGo Client</h1>
           </div>
           <button
             id="btn-compact"
-            onClick={handleCompact} // Thêm onClick
-            disabled={loading} // Thêm disabled
+            onClick={handleCompact}
+            disabled={loading}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
           >
-            <i data-feather="database" className="w-4 h-4" />
+            <Database className="w-4 h-4" />
             Compact DB
           </button>
         </div>
       </header>
 
       <div className="flex-1 flex overflow-hidden max-w-full mx-auto w-full">
-        {/* Truyền state và hàm handler xuống component con */}
         <Sidebar
           activeCollection={activeCollection}
           setActiveCollection={setActiveCollection}

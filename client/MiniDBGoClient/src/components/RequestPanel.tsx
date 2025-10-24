@@ -1,18 +1,106 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Send, Plus, Trash2 } from 'lucide-react';
+import Editor from 'react-simple-code-editor';
+import { highlight, languages } from 'prismjs';
+import 'prismjs/components/prism-json';
+import 'prismjs/themes/prism-tomorrow.css';
+import { KeyValueItem } from '../data/api';
 
-// Props mới: nhận từ App.tsx
+// (Component KeyValueEditor giữ nguyên, không thay đổi)
+interface KeyValueEditorProps {
+  items: KeyValueItem[];
+  onChange: (items: KeyValueItem[]) => void;
+  keyPlaceholder?: string;
+  valuePlaceholder?: string;
+}
+function KeyValueEditor({
+  items,
+  onChange,
+  keyPlaceholder = 'Key',
+  valuePlaceholder = 'Value',
+}: KeyValueEditorProps) {
+  const handleUpdate = (id: string, field: 'key' | 'value' | 'enabled', value: string | boolean) => {
+    const newItems = items.map((item) =>
+      item.id === id ? { ...item, [field]: value } : item
+    );
+    onChange(newItems);
+  };
+  const handleRemove = (id: string) => {
+    const newItems = items.filter((item) => item.id !== id);
+    onChange(newItems);
+  };
+  const handleAdd = () => {
+    const newItem: KeyValueItem = {
+      id: crypto.randomUUID(),
+      key: '',
+      value: '',
+      enabled: true,
+    };
+    onChange([...items, newItem]);
+  };
+  return (
+    <div className="flex flex-col gap-2">
+      {items.map((item) => (
+        <div key={item.id} className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            className="form-checkbox h-5 w-5 text-blue-600 rounded"
+            checked={item.enabled}
+            onChange={(e) => handleUpdate(item.id, 'enabled', e.target.checked)}
+          />
+          <input
+            type="text"
+            className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md"
+            placeholder={keyPlaceholder}
+            value={item.key}
+            onChange={(e) => handleUpdate(item.id, 'key', e.target.value)}
+          />
+          <input
+            type="text"
+            className="flex-1 min-w-0 px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md"
+            placeholder={valuePlaceholder}
+            value={item.value}
+            onChange={(e) => handleUpdate(item.id, 'value', e.target.value)}
+          />
+          <button
+            onClick={() => handleRemove(item.id)}
+            className="p-2 text-gray-500 hover:text-red-600"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+      <button
+        onClick={handleAdd}
+        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 rounded-md"
+      >
+        <Plus className="w-4 h-4" />
+        Add
+      </button>
+    </div>
+  );
+}
+// --- Hết Component KeyValueEditor ---
+
+
 interface RequestPanelProps {
   activeCollection: string | null;
   loading: boolean;
-  onSend: (method: string, path: string, body: string | null) => void;
+  onSend: (
+    method: string,
+    path: string,
+    body: string | null,
+    params: KeyValueItem[],
+    headers: KeyValueItem[]
+  ) => void;
 }
 
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
-const DEFAULT_BODY_SEARCH = '{\n  "group": "vip"\n}';
+const DEFAULT_BODY_SEARCH = '{\n  "category": "electronics"\n}';
 const DEFAULT_BODY_INSERT_MANY =
-  '[\n  {\n    "_id": "doc1",\n    "name": "Alice"\n  },\n  {\n    "_id": "doc2",\n    "name": "Bob"\n  }\n]';
-const DEFAULT_BODY_PUT = '{\n  "name": "Updated Name",\n  "new_field": true\n}';
+  '[\n  {\n    "_id": "p2",\n    "name": "Mouse"\n  },\n  {\n    "_id": "p3",\n    "name": "Keyboard"\n  }\n]';
+const DEFAULT_BODY_PUT = '{\n  "name": "Laptop Pro",\n  "price": 1499\n}';
 
 export default function RequestPanel({
   activeCollection,
@@ -22,33 +110,28 @@ export default function RequestPanel({
   const [method, setMethod] = useState<Method>('POST');
   const [path, setPath] = useState('/{collection}/_search');
   const [body, setBody] = useState(DEFAULT_BODY_SEARCH);
-  const [activeTab, setActiveTab] = useState('request-body-content');
-  const [helperId, setHelperId] = useState('my-doc-id'); // State cho helper ID
+  const [helperId, setHelperId] = useState('p1');
 
-  // Tự động cập nhật path khi collection thay đổi
+  type RequestTab = 'params' | 'body' | 'headers' | 'suggestions';
+  const [activeTab, setActiveTab] = useState<RequestTab>('body');
+  const [params, setParams] = useState<KeyValueItem[]>([]);
+  const [headers, setHeaders] = useState<KeyValueItem[]>([]);
+
   useEffect(() => {
-    if (activeCollection) {
-      // Giữ nguyên method và body nếu đang dùng các API đặc biệt
-      if (path.endsWith('/_search')) {
-        setPath(`/${activeCollection}/_search`);
-        setBody(DEFAULT_BODY_SEARCH);
-        setMethod('POST');
-      } else if (path.endsWith('/_insertMany')) {
-        setPath(`/${activeCollection}/_insertMany`);
-        setBody(DEFAULT_BODY_INSERT_MANY);
-        setMethod('POST');
-      } else {
-        // Mặc định về _search
-        setPath(`/${activeCollection}/_search`);
-        setBody(DEFAULT_BODY_SEARCH);
-        setMethod('POST');
-      }
-    } else {
+    // Chỉ cập nhật path nếu người dùng CHƯA chọn collection
+    // (để tránh ghi đè lên path người dùng tự gõ)
+    if (!activeCollection) {
       setPath('/{collection}/_search');
+    } else {
+      // Nếu path vẫn là placeholder, cập nhật nó
+      if (path.startsWith('/{collection}')) {
+        const newPath = path.replace('/{collection}', `/${activeCollection}`);
+        setPath(newPath);
+      }
     }
+    // Bỏ 'path' khỏi dependency array để không bị vòng lặp
   }, [activeCollection]);
 
-  // Xử lý các nút helper
   const getPath = (id: string) =>
     `/${activeCollection || '{collection}'}/${id}`;
 
@@ -56,42 +139,44 @@ export default function RequestPanel({
     setMethod('GET');
     setPath(getPath(helperId));
     setBody('');
-    setActiveTab('request-body-content');
+    setActiveTab('body');
   };
-
   const handleHelperPut = () => {
     setMethod('PUT');
     setPath(getPath(helperId));
     setBody(DEFAULT_BODY_PUT);
-    setActiveTab('request-body-content');
+    setActiveTab('body');
   };
-
   const handleHelperDelete = () => {
     setMethod('DELETE');
     setPath(getPath(helperId));
     setBody('');
-    setActiveTab('request-body-content');
+    setActiveTab('body');
   };
-
   const handleHelperSearch = () => {
     setMethod('POST');
     setPath(`/${activeCollection || '{collection}'}/_search`);
     setBody(DEFAULT_BODY_SEARCH);
-    setActiveTab('request-body-content');
+    setActiveTab('body');
   };
-
   const handleHelperInsertMany = () => {
     setMethod('POST');
     setPath(`/${activeCollection || '{collection}'}/_insertMany`);
     setBody(DEFAULT_BODY_INSERT_MANY);
-    setActiveTab('request-body-content');
+    setActiveTab('body');
   };
 
-  // Xử lý gửi request
   const handleSend = () => {
-    const bodyToSend = method === 'POST' || method === 'PUT' ? body : null;
-    onSend(method, path, bodyToSend);
+    const bodyToSend = (method === 'POST' || method === 'PUT') ? body : null;
+    onSend(method, path, bodyToSend, params, headers);
   };
+
+  // --- LOGIC VÔ HIỆU HÓA NÚT SEND ---
+  // Vô hiệu hóa nếu:
+  // 1. Đang loading
+  // 2. Path chứa "{collection}" (nghĩa là chưa chọn collection)
+  const isSendDisabled = loading || path.includes('{collection}');
+  // ---
 
   return (
     <div
@@ -99,7 +184,6 @@ export default function RequestPanel({
       className="flex-1 bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col"
     >
       <div className="flex-shrink-0 flex gap-2 p-4 border-b border-gray-200 relative">
-        {/* Dropdown đơn giản cho Method */}
         <select
           id="method-toggle-button"
           data-method={method}
@@ -112,7 +196,6 @@ export default function RequestPanel({
           <option value="PUT">PUT</option>
           <option value="DELETE">DELETE</option>
         </select>
-
         <input
           value={path}
           onChange={(e) => setPath(e.target.value)}
@@ -121,64 +204,110 @@ export default function RequestPanel({
           className="flex-1 min-w-0 px-4 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md"
           placeholder="/{collection}/{id}"
         />
-
         <button
           id="btn-send-rest"
-          onClick={handleSend} // Thêm onClick
-          disabled={loading} // Thêm disabled
+          onClick={handleSend}
+          disabled={isSendDisabled} // <-- SỬ DỤNG LOGIC MỚI
           className="flex-shrink-0 flex items-center justify-center gap-2 px-6 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
         >
-          <i data-feather="send" className="w-4 h-4" />
+          <Send className="w-4 h-4" />
           Send
         </button>
       </div>
 
+      {/* (Phần còn lại của file: Tabs, Editor, KeyValueEditor... giữ nguyên) */}
       <div
         id="request-sub-tabs"
         className="flex-shrink-0 flex border-b border-gray-200 px-4"
       >
         <button
-          onClick={() => setActiveTab('request-body-content')}
-          className={`sub-tab-button py-3 px-4 text-sm font-medium ${activeTab === 'request-body-content' ? 'active' : ''
+          onClick={() => setActiveTab('params')}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium ${activeTab === 'params' ? 'active' : ''
+            }`}
+        >
+          Params
+        </button>
+        <button
+          onClick={() => setActiveTab('body')}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium ${activeTab === 'body' ? 'active' : ''
             }`}
         >
           Body
         </button>
         <button
-          onClick={() => setActiveTab('request-params-content')}
-          className={`sub-tab-button py-3 px-4 text-sm font-medium ${activeTab === 'request-params-content' ? 'active' : ''
+          onClick={() => setActiveTab('headers')}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium ${activeTab === 'headers' ? 'active' : ''
             }`}
         >
-          Query Helpers
+          Headers
+        </button>
+        <button
+          onClick={() => setActiveTab('suggestions')}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium ${activeTab === 'suggestions' ? 'active' : ''
+            }`}
+        >
+          Suggestions
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
         <div
-          id="request-body-content"
-          className={`${activeTab === 'request-body-content' ? '' : 'hidden'}`}
+          id="request-params-content"
+          className={`${activeTab === 'params' ? '' : 'hidden'}`}
         >
-          <textarea
-            id="rest-body"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder='{"key": "value"}'
-            className="w-full h-64 p-3 text-sm font-mono bg-gray-50 border border-gray-300 rounded-md resize-vertical"
-            disabled={method === 'GET' || method === 'DELETE'}
+          <KeyValueEditor
+            items={params}
+            onChange={setParams}
+            keyPlaceholder="Param Key"
+            valuePlaceholder="Value"
           />
         </div>
+
         <div
-          id="request-params-content"
-          className={`${activeTab === 'request-params-content' ? '' : 'hidden'}`}
+          id="request-body-content"
+          className={`${activeTab === 'body' ? '' : 'hidden'}`}
+        >
+          <div className="editor-container w-full h-64 bg-gray-50 border border-gray-300 rounded-md overflow-auto">
+            <Editor
+              value={body}
+              onValueChange={(code) => setBody(code)}
+              highlight={(code) => highlight(code, languages.json, 'json')}
+              padding={12}
+              className="editor"
+              style={{
+                fontFamily: '"Fira code", "Fira Mono", monospace',
+                fontSize: 14,
+                lineHeight: 1.5,
+              }}
+              disabled={method === 'GET' || method === 'DELETE'}
+            />
+          </div>
+        </div>
+
+        <div
+          id="request-headers-content"
+          className={`${activeTab === 'headers' ? '' : 'hidden'}`}
+        >
+          <KeyValueEditor
+            items={headers}
+            onChange={setHeaders}
+            keyPlaceholder="Header Name"
+            valuePlaceholder="Header Value"
+          />
+        </div>
+
+        <div
+          id="request-suggestions-content"
+          className={`${activeTab === 'suggestions' ? '' : 'hidden'}`}
         >
           <p className="text-sm text-gray-600 mb-4">
-            Sử dụng các nút trợ giúp này để tự động điền vào thanh Request ở trên
-            (yêu cầu chọn Collection trước).
+            Use these helpers to auto-fill the request bar (requires a selected
+            collection).
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <h3 className="font-semibold text-gray-800 mb-3">
-                Thao tác theo ID
+                ID Operations
               </h3>
               <input
                 id="helper-id"
@@ -209,11 +338,11 @@ export default function RequestPanel({
             </div>
             <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
               <h3 className="font-semibold text-gray-800 mb-3">
-                Thao tác hàng loạt
+                Batch Operations
               </h3>
               <p className="text-xs text-gray-500 mb-3">
-                Sử dụng các API `_search` hoặc `_insertMany` cho Collection đã
-                chọn.
+                Use the `_search` or `_insertMany` APIs for the selected
+                collection.
               </p>
               <div className="flex gap-2 mt-3">
                 <button

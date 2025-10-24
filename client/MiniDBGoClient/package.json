@@ -10,19 +10,20 @@
   "dependencies": {
     "@rsbuild/plugin-svgr": "^1.0.7",
     "clsx": "^1.2.1",
-    "feather-icons": "^4.29.0",
-    "highlight.js": "^11.9.0",
     "lucide-react": "^0.263.1",
+    "prismjs": "^1.30.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-json-view": "^1.21.3",
+    "react-simple-code-editor": "^0.14.1"
   },
   "devDependencies": {
     "@rsbuild/core": "^1.2.14",
     "@rsbuild/plugin-node-polyfill": "^1.3.0",
     "@rsbuild/plugin-react": "^1.1.1",
     "@rsbuild/plugin-sass": "^1.2.2",
-    "@types/highlight.js": "^10.1.0",
     "@types/node": "^20.0.0",
+    "@types/prismjs": "^1.26.5",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "autoprefixer": "^10.4.0",

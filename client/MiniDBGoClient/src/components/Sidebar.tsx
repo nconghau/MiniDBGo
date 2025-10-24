@@ -20,8 +20,8 @@ export default function Sidebar({
 
   async function loadCollections() {
     try {
-      // Sử dụng fetchApi
-      const res = await fetchApi('GET', '/api/_collections', null);
+      // Sử dụng fetchApi với params và headers rỗng
+      const res = await fetchApi('GET', '/_collections', null, [], []); // <-- THAY ĐỔI Ở ĐÂY
       if (res.isError || !Array.isArray(res.body)) {
         throw new Error(res.error || 'Failed to load collections');
       }
