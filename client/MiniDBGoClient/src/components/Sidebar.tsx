@@ -1,50 +1,49 @@
-import React, { useEffect, useState } from 'react';
-import { fetchApi, formatBytes } from '../data/api';
-import { RefreshCw, Database, Search } from 'lucide-react';
+import React, { useEffect, useState } from 'react'
+import { fetchApi, formatBytes } from '../data/api'
+import { RefreshCw, Database, Search } from 'lucide-react'
 
 interface CollectionInfo {
-  name: string;
-  docCount: number;
-  byteSize: number;
+  name: string
+  docCount: number
+  byteSize: number
 }
 
 interface SidebarProps {
-  activeCollection: string | null;
-  setActiveCollection: (collection: string) => void;
+  activeCollection: string | null
+  setActiveCollection: (collection: string) => void
 }
 
 export default function Sidebar({
   activeCollection,
   setActiveCollection,
 }: SidebarProps) {
-  const [collections, setCollections] = useState<CollectionInfo[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [collections, setCollections] = useState<CollectionInfo[]>([])
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
-    loadCollections();
-  }, []);
+    loadCollections()
+  }, [])
 
   async function loadCollections() {
     try {
-      const res = await fetchApi('GET', '/_collections', null, [], []);
+      const res = await fetchApi('GET', '/_collections', null, [], [])
       if (res.isError || !Array.isArray(res.body)) {
-        throw new Error(res.error || 'Failed to load collections');
+        throw new Error(res.error || 'Failed to load collections')
       }
 
       const sortedCollections = (res.body as CollectionInfo[]).sort((a, b) =>
-        a.name.localeCompare(b.name)
-      );
-      setCollections(sortedCollections);
-
+        a.name.localeCompare(b.name),
+      )
+      setCollections(sortedCollections)
     } catch (e) {
-      console.error(e);
-      setCollections([]);
+      console.error(e)
+      setCollections([])
     }
   }
 
   const filteredCollections = collections.filter((col) =>
-    col.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+    col.name.toLowerCase().includes(searchTerm.toLowerCase()),
+  )
 
   return (
     // --- CẬP NHẬT: Đổi nền sang xám (slate) ---
@@ -57,6 +56,7 @@ export default function Sidebar({
           Collections
         </h2>
         <button
+          type="button"
           title="Refresh Collections"
           onClick={loadCollections}
           className="p-1 text-slate-500 hover:text-primary-600 rounded-full hover:bg-primary-100 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-primary-500"
@@ -96,12 +96,14 @@ export default function Sidebar({
               data-collection-name={col.name}
               // --- CẬP NHẬT: Chuẩn hóa text-sm, active sẽ dùng CSS ---
               className={`flex items-center gap-3 p-3 text-sm rounded-md cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary-500 ${activeCollection === col.name
-                  ? 'active' // .active (font-semibold) được định nghĩa trong index.css
-                  : 'text-slate-700 hover:bg-slate-200'
+                ? 'active' // .active (font-semibold) được định nghĩa trong index.css
+                : 'text-slate-700 hover:bg-slate-200'
                 }`}
             >
               <Database
-                className={`w-4 h-4 ${activeCollection === col.name ? 'text-primary-600' : 'text-slate-500'
+                className={`w-4 h-4 ${activeCollection === col.name
+                  ? 'text-primary-600'
+                  : 'text-slate-500'
                   }`}
               />
               <span className="flex-1 truncate">{col.name}</span>
@@ -119,5 +121,5 @@ export default function Sidebar({
         </ul>
       </div>
     </aside>
-  );
+  )
 }

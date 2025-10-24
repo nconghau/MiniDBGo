@@ -1,17 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { Send, Plus, Trash2, Combine, Eraser, ChevronDown, Wand2 } from 'lucide-react';
-import Editor from 'react-simple-code-editor';
-import { highlight, languages } from 'prismjs';
-import 'prismjs/components/prism-json';
-import 'prismjs/themes/prism-tomorrow.css';
-import { KeyValueItem } from '../data/api';
+import React, { useEffect, useState } from 'react'
+import {
+  Send,
+  Plus,
+  Trash2,
+  Combine,
+  Eraser,
+  ChevronDown,
+  Wand2,
+} from 'lucide-react'
+import Editor from 'react-simple-code-editor'
+import { highlight, languages } from 'prismjs'
+import 'prismjs/components/prism-json'
+import 'prismjs/themes/prism-tomorrow.css'
+import { KeyValueItem } from '../data/api'
 
 // --- Component UI con cho Key-Value (Đã sửa) ---
 interface KeyValueEditorProps {
-  items: KeyValueItem[];
-  onChange: (items: KeyValueItem[]) => void;
-  keyPlaceholder?: string;
-  valuePlaceholder?: string;
+  items: KeyValueItem[]
+  onChange: (items: KeyValueItem[]) => void
+  keyPlaceholder?: string
+  valuePlaceholder?: string
 }
 function KeyValueEditor({
   items,
@@ -19,25 +27,29 @@ function KeyValueEditor({
   keyPlaceholder = 'Key',
   valuePlaceholder = 'Value',
 }: KeyValueEditorProps) {
-  const handleUpdate = (id: string, field: 'key' | 'value' | 'enabled', value: string | boolean) => {
+  const handleUpdate = (
+    id: string,
+    field: 'key' | 'value' | 'enabled',
+    value: string | boolean,
+  ) => {
     const newItems = items.map((item) =>
-      item.id === id ? { ...item, [field]: value } : item
-    );
-    onChange(newItems);
-  };
+      item.id === id ? { ...item, [field]: value } : item,
+    )
+    onChange(newItems)
+  }
   const handleRemove = (id: string) => {
-    const newItems = items.filter((item) => item.id !== id);
-    onChange(newItems);
-  };
+    const newItems = items.filter((item) => item.id !== id)
+    onChange(newItems)
+  }
   const handleAdd = () => {
     const newItem: KeyValueItem = {
       id: crypto.randomUUID(),
       key: '',
       value: '',
       enabled: true,
-    };
-    onChange([...items, newItem]);
-  };
+    }
+    onChange([...items, newItem])
+  }
   return (
     <div className="flex flex-col gap-2">
       {items.map((item) => (
@@ -80,149 +92,152 @@ function KeyValueEditor({
         Add
       </button>
     </div>
-  );
+  )
 }
 // --- Hết Component KeyValueEditor ---
 
-
 interface RequestPanelProps {
-  activeCollection: string | null;
-  loading: boolean;
+  activeCollection: string | null
+  loading: boolean
   onSend: (
     method: string,
     path: string,
     body: string | null,
     params: KeyValueItem[],
-    headers: KeyValueItem[]
-  ) => void;
+    headers: KeyValueItem[],
+  ) => void
 }
 
-type Method = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE'
 
-const DEFAULT_BODY_SEARCH = '{\n  "category": "electronics"\n}';
+const DEFAULT_BODY_SEARCH = '{\n  "category": "electronics"\n}'
 const DEFAULT_BODY_INSERT_MANY =
-  '[\n  {\n    "_id": "p2",\n    "name": "Mouse"\n  },\n  {\n    "_id": "p3",\n    "name": "Keyboard"\n  }\n]';
-const DEFAULT_BODY_PUT = '{\n  "name": "Laptop Pro",\n  "price": 1499\n}';
-const DEFAULT_BODY_EMPTY = '{\n  \n}';
+  '[\n  {\n    "_id": "p2",\n    "name": "Mouse"\n  },\n  {\n    "_id": "p3",\n    "name": "Keyboard"\n  }\n]'
+const DEFAULT_BODY_PUT = '{\n  "name": "Laptop Pro",\n  "price": 1499\n}'
+const DEFAULT_BODY_EMPTY = '{\n  \n}'
 
 // --- CẬP NHẬT: Mockup data cho "Smart Suggestions" ---
 // (Logic thực tế sẽ cần phân tích các collection)
 const MOCK_FIELD_SUGGESTIONS = [
-  "_id", "name", "category", "price", "email", "address", "created_at"
-];
+  '_id',
+  'name',
+  'category',
+  'price',
+  'email',
+  'address',
+  'created_at',
+]
 
 export default function RequestPanel({
   activeCollection,
   loading,
   onSend,
 }: RequestPanelProps) {
-  const [method, setMethod] = useState<Method>('POST');
-  const [path, setPath] = useState('/{collection}/_search');
-  const [body, setBody] = useState(DEFAULT_BODY_SEARCH);
-  const [helperId, setHelperId] = useState('p1');
-  type RequestTab = 'params_headers' | 'body';
-  const [activeTab, setActiveTab] = useState<RequestTab>('body');
-  const [params, setParams] = useState<KeyValueItem[]>([]);
-  const [headers, setHeaders] = useState<KeyValueItem[]>([]);
+  const [method, setMethod] = useState<Method>('POST')
+  const [path, setPath] = useState('/{collection}/_search')
+  const [body, setBody] = useState(DEFAULT_BODY_SEARCH)
+  const [helperId, setHelperId] = useState('p1')
+  type RequestTab = 'params_headers' | 'body'
+  const [activeTab, setActiveTab] = useState<RequestTab>('body')
+  const [params, setParams] = useState<KeyValueItem[]>([])
+  const [headers, setHeaders] = useState<KeyValueItem[]>([])
 
-  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!activeCollection) {
-      setPath('/{collection}/_search');
+      setPath('/{collection}/_search')
     } else {
       if (path.startsWith('/{collection}')) {
-        const newPath = path.replace('/{collection}', `/${activeCollection}`);
-        setPath(newPath);
+        const newPath = path.replace('/{collection}', `/${activeCollection}`)
+        setPath(newPath)
       }
     }
-  }, [activeCollection]);
+  }, [activeCollection])
 
-  const getPath = (id: string) =>
-    `/${activeCollection || '{collection}'}/${id}`;
+  const getPath = (id: string) => `/${activeCollection || '{collection}'}/${id}`
 
   const handleHelperGet = () => {
-    setMethod('GET');
-    setPath(getPath(helperId));
-    setBody('');
-    setActiveTab('body');
-    setJsonError(null);
-  };
+    setMethod('GET')
+    setPath(getPath(helperId))
+    setBody('')
+    setActiveTab('body')
+    setJsonError(null)
+  }
   const handleHelperPut = () => {
-    setMethod('PUT');
-    setPath(getPath(helperId));
-    setBody(DEFAULT_BODY_PUT);
-    setActiveTab('body');
-    setJsonError(null);
-  };
+    setMethod('PUT')
+    setPath(getPath(helperId))
+    setBody(DEFAULT_BODY_PUT)
+    setActiveTab('body')
+    setJsonError(null)
+  }
   const handleHelperDelete = () => {
-    setMethod('DELETE');
-    setPath(getPath(helperId));
-    setBody('');
-    setActiveTab('body');
-    setJsonError(null);
-  };
+    setMethod('DELETE')
+    setPath(getPath(helperId))
+    setBody('')
+    setActiveTab('body')
+    setJsonError(null)
+  }
   const handleHelperSearch = () => {
-    setMethod('POST');
-    setPath(`/${activeCollection || '{collection}'}/_search`);
-    setBody(DEFAULT_BODY_SEARCH);
-    setActiveTab('body');
-    setJsonError(null);
-  };
+    setMethod('POST')
+    setPath(`/${activeCollection || '{collection}'}/_search`)
+    setBody(DEFAULT_BODY_SEARCH)
+    setActiveTab('body')
+    setJsonError(null)
+  }
   const handleHelperInsertMany = () => {
-    setMethod('POST');
-    setPath(`/${activeCollection || '{collection}'}/_insertMany`);
-    setBody(DEFAULT_BODY_INSERT_MANY);
-    setActiveTab('body');
-    setJsonError(null);
-  };
+    setMethod('POST')
+    setPath(`/${activeCollection || '{collection}'}/_insertMany`)
+    setBody(DEFAULT_BODY_INSERT_MANY)
+    setActiveTab('body')
+    setJsonError(null)
+  }
 
   const handleSend = () => {
     if (jsonError && (method === 'POST' || method === 'PUT')) {
-      alert(`Invalid JSON: ${jsonError}`);
-      return;
+      alert(`Invalid JSON: ${jsonError}`)
+      return
     }
-    const bodyToSend = (method === 'POST' || method === 'PUT') ? body : null;
-    onSend(method, path, bodyToSend, params, headers);
-  };
+    const bodyToSend = method === 'POST' || method === 'PUT' ? body : null
+    onSend(method, path, bodyToSend, params, headers)
+  }
 
   const handleFormatJson = () => {
     try {
       if (body.trim() === '' || body.trim() === '{}') {
-        setBody(DEFAULT_BODY_EMPTY);
-        setJsonError(null);
-        return;
+        setBody(DEFAULT_BODY_EMPTY)
+        setJsonError(null)
+        return
       }
-      const parsed = JSON.parse(body);
-      const formatted = JSON.stringify(parsed, null, 2);
-      setBody(formatted);
-      setJsonError(null);
+      const parsed = JSON.parse(body)
+      const formatted = JSON.stringify(parsed, null, 2)
+      setBody(formatted)
+      setJsonError(null)
     } catch (e: any) {
-      setJsonError(`Invalid JSON, cannot format: ${e.message}`);
+      setJsonError(`Invalid JSON, cannot format: ${e.message}`)
     }
-  };
+  }
 
   const handleClearJson = () => {
-    setBody(DEFAULT_BODY_EMPTY);
-    setJsonError(null);
-  };
+    setBody(DEFAULT_BODY_EMPTY)
+    setJsonError(null)
+  }
 
   const handleBodyChange = (code: string) => {
-    setBody(code);
+    setBody(code)
     try {
       if (code.trim() === '' || method === 'GET' || method === 'DELETE') {
-        setJsonError(null);
-        return;
+        setJsonError(null)
+        return
       }
-      JSON.parse(code);
-      setJsonError(null); // Valid JSON
+      JSON.parse(code)
+      setJsonError(null) // Valid JSON
     } catch (e: any) {
-      setJsonError(e.message); // Invalid JSON
+      setJsonError(e.message) // Invalid JSON
     }
-  };
+  }
 
-
-  const isSendDisabled = loading || path.includes('{collection}');
+  const isSendDisabled = loading || path.includes('{collection}')
 
   return (
     // --- CẬP NHẬT: Bỏ card, thêm padding ---
@@ -273,15 +288,21 @@ export default function RequestPanel({
       >
         <button
           onClick={() => setActiveTab('params_headers')}
-          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${activeTab === 'params_headers' ? 'active' : 'text-slate-600 hover:text-slate-800'
-            }`}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${
+            activeTab === 'params_headers'
+              ? 'active'
+              : 'text-slate-600 hover:text-slate-800'
+          }`}
         >
           Params / Headers
         </button>
         <button
           onClick={() => setActiveTab('body')}
-          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${activeTab === 'body' ? 'active' : 'text-slate-600 hover:text-slate-800'
-            }`}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${
+            activeTab === 'body'
+              ? 'active'
+              : 'text-slate-600 hover:text-slate-800'
+          }`}
         >
           Body / Suggestions
         </button>
@@ -295,7 +316,9 @@ export default function RequestPanel({
           className={`${activeTab === 'params_headers' ? '' : 'hidden'} space-y-6`}
         >
           <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Query Params</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">
+              Query Params
+            </h3>
             <KeyValueEditor
               items={params}
               onChange={setParams}
@@ -304,7 +327,9 @@ export default function RequestPanel({
             />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Headers</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">
+              Headers
+            </h3>
             <KeyValueEditor
               items={headers}
               onChange={setHeaders}
@@ -322,7 +347,9 @@ export default function RequestPanel({
           {/* --- CẬP NHẬT: Editor JSON --- */}
           <div>
             <div className="flex justify-between items-center mb-2 px-1">
-              <h3 className="text-sm font-semibold text-gray-700">Request Body (JSON)</h3>
+              <h3 className="text-sm font-semibold text-gray-700">
+                Request Body (JSON)
+              </h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleFormatJson}
@@ -342,10 +369,13 @@ export default function RequestPanel({
             </div>
 
             {/* --- CẬP NHẬT: Logic border (dùng slate) --- */}
-            <div className={`editor-container w-full h-64 bg-slate-50 rounded-md overflow-hidden transition-colors ${jsonError
-              ? 'border-2 border-red-500' // Lỗi: border đỏ dày
-              : 'border border-slate-300 focus-within:border-primary-500 focus-within:border-2' // Mặc định: border xám, Focus: border tím
-              }`}>
+            <div
+              className={`editor-container w-full h-64 bg-slate-50 rounded-md overflow-hidden transition-colors ${
+                jsonError
+                  ? 'border-2 border-red-500' // Lỗi: border đỏ dày
+                  : 'border border-slate-300 focus-within:border-primary-500 focus-within:border-2' // Mặc định: border xám, Focus: border tím
+              }`}
+            >
               <Editor
                 value={body}
                 onValueChange={handleBodyChange}
@@ -361,19 +391,21 @@ export default function RequestPanel({
               />
             </div>
             {jsonError && (
-              <p className="mt-2 text-xs text-red-600 font-mono">
-                {jsonError}
-              </p>
+              <p className="mt-2 text-xs text-red-600 font-mono">{jsonError}</p>
             )}
           </div>
 
           {/* --- CẬP NHẬT: Suggestions --- */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Suggestions</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">
+              Suggestions
+            </h3>
 
             {/* --- MỚI: "Smart Suggestions" Mockup --- */}
             <div className="mb-4">
-              <h4 className="text-xs font-semibold text-gray-600 mb-2">Field Suggestions (Click to copy)</h4>
+              <h4 className="text-xs font-semibold text-gray-600 mb-2">
+                Field Suggestions (Click to copy)
+              </h4>
               <div className="flex flex-wrap gap-2">
                 {MOCK_FIELD_SUGGESTIONS.map((field) => (
                   <button
@@ -392,7 +424,10 @@ export default function RequestPanel({
               Hoặc dùng các nút điền nhanh (cần chọn collection).
             </p>
             <div className="mb-3">
-              <label htmlFor="helper-id" className="block text-xs font-medium text-gray-600 mb-1">
+              <label
+                htmlFor="helper-id"
+                className="block text-xs font-medium text-gray-600 mb-1"
+              >
                 Document ID
               </label>
               <input
@@ -406,27 +441,42 @@ export default function RequestPanel({
               <button
                 onClick={handleHelperGet}
                 className="px-3 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-green-500"
-              > GET </button>
+              >
+                {' '}
+                GET{' '}
+              </button>
               <button
                 onClick={handleHelperPut}
                 className="px-3 py-2 text-sm font-medium text-yellow-700 bg-yellow-100 rounded-md hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-yellow-500"
-              > PUT </button>
+              >
+                {' '}
+                PUT{' '}
+              </button>
               <button
                 onClick={handleHelperDelete}
                 className="px-3 py-2 text-sm font-medium text-red-700 bg-red-100 rounded-md hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500"
-              > DELETE </button>
+              >
+                {' '}
+                DELETE{' '}
+              </button>
               <button
                 onClick={handleHelperSearch}
                 className="px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500"
-              > _search </button>
+              >
+                {' '}
+                _search{' '}
+              </button>
               <button
                 onClick={handleHelperInsertMany}
                 className="px-3 py-2 text-sm font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-purple-500"
-              > _insertMany </button>
+              >
+                {' '}
+                _insertMany{' '}
+              </button>
             </div>
           </div>
         </div>
       </div>
     </div>
-  );
+  )
 }

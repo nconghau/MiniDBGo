@@ -1,16 +1,12 @@
-import { defineConfig } from '@rsbuild/core';
-import { pluginReact } from '@rsbuild/plugin-react';
-import { pluginSass } from '@rsbuild/plugin-sass';
-import { pluginSvgr } from '@rsbuild/plugin-svgr';
-import { DefinePlugin } from '@rspack/core';
-import path from 'path';
+import { defineConfig } from '@rsbuild/core'
+import { pluginReact } from '@rsbuild/plugin-react'
+import { pluginSass } from '@rsbuild/plugin-sass'
+import { pluginSvgr } from '@rsbuild/plugin-svgr'
+import { DefinePlugin } from '@rspack/core'
+import path from 'path'
 
 export default defineConfig({
-  plugins: [
-    pluginSvgr(),
-    pluginSass(),
-    pluginReact(),
-  ],
+  plugins: [pluginSvgr(), pluginSass(), pluginReact()],
   server: {
     // Chuyển tiếp (proxy) tất cả request /api
     // từ server 3000 (React) sang server 6866 (Go)
@@ -44,5 +40,5 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, 'src'),
     },
-  }
-});
+  },
+})

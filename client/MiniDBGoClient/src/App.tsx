@@ -1,14 +1,14 @@
-import React, { useState } from 'react';
-import Sidebar from './components/Sidebar';
-import RequestPanel from './components/RequestPanel';
-import ResponsePanel from './components/ResponsePanel';
-import { fetchApi, ResponseData, KeyValueItem } from './data/api';
-import { Menu, Database } from 'lucide-react';
+import React, { useState } from 'react'
+import Sidebar from './components/Sidebar'
+import RequestPanel from './components/RequestPanel'
+import ResponsePanel from './components/ResponsePanel'
+import { fetchApi, ResponseData, KeyValueItem } from './data/api'
+import { Menu, Database } from 'lucide-react'
 
 export default function App() {
-  const [activeCollection, setActiveCollection] = useState<string | null>(null);
-  const [response, setResponse] = useState<ResponseData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [activeCollection, setActiveCollection] = useState<string | null>(null)
+  const [response, setResponse] = useState<ResponseData | null>(null)
+  const [loading, setLoading] = useState(false)
 
   const handleSendRequest = async (
     method: string,
@@ -17,18 +17,18 @@ export default function App() {
     params: KeyValueItem[],
     headers: KeyValueItem[],
   ) => {
-    setLoading(true);
-    const res = await fetchApi(method, path, body, params, headers);
-    setResponse(res);
-    setLoading(false);
-  };
+    setLoading(true)
+    const res = await fetchApi(method, path, body, params, headers)
+    setResponse(res)
+    setLoading(false)
+  }
 
   const handleCompact = async () => {
-    setLoading(true);
-    const res = await fetchApi('POST', '/_compact', null, [], []);
-    setResponse(res);
-    setLoading(false);
-  };
+    setLoading(true)
+    const res = await fetchApi('POST', '/_compact', null, [], [])
+    setResponse(res)
+    setLoading(false)
+  }
 
   return (
     // --- CẬP NHẬT: Đổi nền sang màu xám lạnh (slate) ---
@@ -75,5 +75,5 @@ export default function App() {
         </main>
       </div>
     </div>
-  );
+  )
 }
