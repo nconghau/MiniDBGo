@@ -2,7 +2,7 @@
 
 ## Overview
 
-MiniDBGo is a lightweight, educational database engine written in Go. This project is designed as a learning resource to understand core database internals such as CRUD operations, durability through Write-Ahead Logs (WAL), and the storage architecture of a Log-Structured Merge-Tree (LSM-Tree).
+MiniDBGo is a lightweight, educational database engine written in Go. This project is designed as a study resource to understand core database internals such as CRUD operations, durability through Write-Ahead Logs (WAL), and the storage architecture of a Log-Structured Merge-Tree (LSM-Tree).
 
 ## 🔥 Features
 
@@ -21,7 +21,6 @@ MiniDBGo is a lightweight, educational database engine written in Go. This proje
 MiniDBGo is built upon a **Log-Structured Merge-Tree (LSM-Tree)**, an architecture optimized for high write throughput. Here’s a simple breakdown of how it operates:
 
 ### ✍️ Write Data?
----
 When you action insert or update database:
 
 1.  **Safety First (WAL)**: The data is immediately written to a **Write-Ahead Log** (`wal.log`) on disk. This acts as a journal, ensuring that no data is lost even if the database crashes.
@@ -30,19 +29,16 @@ When you action insert or update database:
 
 ```mermaid
 flowchart TD
-    subgraph Write Path
-        A[Client Command: insertOne / updateOne] --> B["Write to WAL (wal.log)"]
-        B --> C["Insert into MemTable (in-memory SkipList)"]
-        C --> D{MemTable full?}
-        D -->|No| C
-        D -->|Yes| E[Freeze -> Immutable MemTable]
-        E --> F["Flush to Disk as SSTable (.sst)"]
-        F --> G[Clear WAL for next round]
-    end
+  A([Client Command: insertOne / updateOne]) --> B["Write to **WAL** (wal.log)"]
+  B --> C["Insert into **MemTable** (in-memory SkipList)"]
+  C --> D{**MemTable** full?}
+  D -->|No| C
+  D -->|Yes| E[Freeze -> Immutable **MemTable**]
+  E --> F["Flush to Disk as **SSTable** (.sst)"]
+  F --> G([Clear **WAL** for next round])
 ```
 
 ### 🔍  Read Data?
----
 When you read data MiniDBGo searches for the key in a specific order to ensure the most recent data is found first:
 
 1.  **Check the MemTable**: The active MemTable is checked first, as it contains the very latest writes.
@@ -51,21 +47,17 @@ When you read data MiniDBGo searches for the key in a specific order to ensure t
 
 ```mermaid
 flowchart TD
-    subgraph Read Path 🔍
-        H[Client Command: findOne / findMany] --> I["Check MemTable (latest)"]
-        I -->|Found| Z["✅ Return Result"]
-        I -->|Not Found| J[Check Immutable MemTables]
-        J -->|Found| Z
-        J -->|Not Found| K["Search SSTables (newest → oldest)"]
-        K -->|Found| Z
-        K -->|Not Found| L["❌ Key Not Found"]
-    end
+  A([Client Command: insertOne / updateOne]) --> B["Write to **WAL** (wal.log)"]
+  B --> C["Insert into **MemTable** (in-memory SkipList)"]
+  C --> D{**MemTable** full?}
+  D -->|No| C
+  D -->|Yes| E[Freeze -> **Immutable MemTable**]
+  E --> F["Flush to Disk as **SSTable** (.sst)"]
+  F --> G([Clear **WAL** for next round])
 ```
 
 ### ⚙️ Background Maintenance?
----
 Over time, many small SSTable files can be created. The `compact` command triggers a **Compaction** process, which merges multiple smaller SSTables into a single, larger one. This process cleans up old or deleted data and optimizes the structure for faster reads.
-
 
 ## 🚀 Quick Start
 
@@ -126,7 +118,7 @@ curl -X POST http://localhost:6866/api/_compact
 
 ## ⚠️ Disclaimer
 
-This project is for **educational purposes only** and is not production-ready. It is intended as a tool for learning database internals in Go.
+This project is for **educational purposes only** and is not production-ready. It is intended as a tool for study database internals in Go.
 
 ## 📜 License
 
