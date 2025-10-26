@@ -1,10 +1,8 @@
 version: "3.9"
 
 services:
-  # ---------------------------
-  # 🗄️ MiniDBGo Database API
-  # ---------------------------
   minidbgo:
+    platform: linux/arm64
     build:
       context: .
       dockerfile: Dockerfile
@@ -13,26 +11,37 @@ services:
       - "6866:6866"
     volumes:
       - ./data:/data
+    environment:
+      - MODE=server
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:6866/api/_collections"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"        
+          memory: 1G        
+        reservations:
+          cpus: "0.5"
+          memory: 512M
 
-  # ---------------------------
-  # 💻 React Client UI
-  # ---------------------------
   minidbgo-client:
+    platform: linux/arm64
     build:
       context: ./client/MiniDBGoClient
       dockerfile: Dockerfile
+      args:
+        - PUBLIC_BASE_URL_ARG=http://localhost:6866/api
     container_name: minidbgo-client
     ports:
-      - "5173:80"
-    environment:
-      - VITE_API_BASE=http://minidbgo:6866/api
+      - "3000:80"
     depends_on:
-      minidbgo:
-        condition: service_healthy
+      - minidbgo
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M 
+        reservations:
+          cpus: "0.2"
+          memory: 128M
+

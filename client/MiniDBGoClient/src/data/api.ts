@@ -30,12 +30,30 @@ export interface ResponseData {
 // --- 3. Cập nhật hàm fetchApi (QUAN TRỌNG) ---
 export async function fetchApi(
   method: string,
-  path: string, // Đường dẫn CHƯA có /api/
+  path: string, // Đường dẫn CHƯA có /api/ (ví dụ: /_collections)
   body: string | null,
   params: KeyValueItem[], // <-- MỚI
   headers: KeyValueItem[], // <-- MỚI
 ): Promise<ResponseData> {
   const startTime = performance.now()
+
+  // --- Lấy BASE_URL từ Environment Variables ---
+  // Biến này được inject bởi rsbuild từ file .env
+  const BASE_URL = import.meta.env.PUBLIC_BASE_URL
+
+  if (!BASE_URL) {
+    console.error('LỖI CẤU HÌNH: PUBLIC_BASE_URL chưa được định nghĩa trong file .env')
+    // Trả về lỗi ngay lập tức
+    return {
+      status: 'Config Error',
+      time: '0 ms',
+      size: '0 Bytes',
+      body: { error: 'PUBLIC_BASE_URL is not defined. Please check your .env file.' },
+      headers: {},
+      isError: true,
+      error: 'PUBLIC_BASE_URL is not defined.',
+    }
+  }
 
   // --- Xử lý Params ---
   const searchParams = new URLSearchParams()
@@ -44,11 +62,17 @@ export async function fetchApi(
     .forEach((p) => searchParams.append(p.key, p.value))
 
   const queryString = searchParams.toString()
-  // Đảm bảo path bắt đầu bằng /api và thêm query string
-  const finalPath = `/api${path}${queryString ? `?${queryString}` : ''}`
+
+  // --- THAY ĐỔI CHÍNH: Xây dựng finalPath từ BASE_URL ---
+  // `path` của bạn đã bao gồm dấu "/" (ví dụ: "/_compact")
+  // `BASE_URL` là "http://localhost:6866/api"
+  // Kết quả: "http://localhost:6866/api/_compact?..."
+  const finalPath = `${BASE_URL}${path}${queryString ? `?${queryString}` : ''}`
 
   // --- Xử lý Headers ---
   const requestHeaders: Record<string, string> = {
+    // ... (phần còn lại của hàm giữ nguyên)
+    // ...
     'Content-Type': 'application/json',
     Accept: 'application/json',
   }
@@ -64,11 +88,13 @@ export async function fetchApi(
   }
 
   if (body && (method === 'POST' || method === 'PUT')) {
-    options.body = body
+    options.body = body // [cite: 254]
   }
 
   try {
     const res = await fetch(finalPath, options) // <-- Dùng finalPath
+    // ... (phần còn lại của hàm try...catch giữ nguyên)
+    // ...
     const endTime = performance.now()
     const time = (endTime - startTime).toFixed(2)
 
@@ -83,14 +109,14 @@ export async function fetchApi(
 
     let jsonBody: any
     try {
-      jsonBody = JSON.parse(textBody)
+      jsonBody = JSON.parse(textBody) // [cite: 255]
     } catch (e) {
       jsonBody = textBody
     }
 
     if (!res.ok) {
       const errorMsg =
-        typeof jsonBody.error === 'string' ? jsonBody.error : textBody
+        typeof jsonBody.error === 'string' ? jsonBody.error : textBody // [cite: 256]
       return {
         status: `${res.status} ${res.statusText}`,
         time: `${time} ms`,
@@ -104,7 +130,7 @@ export async function fetchApi(
 
     // Thành công
     return {
-      status: `${res.status} ${res.statusText}`,
+      status: `${res.status} ${res.statusText}`, // [cite: 257]
       time: `${time} ms`,
       size: size,
       body: jsonBody,
@@ -118,7 +144,7 @@ export async function fetchApi(
     return {
       status: 'Network Error',
       time: `${time} ms`,
-      size: '0 Bytes',
+      size: '0 Bytes', // [cite: 258]
       body: { error: err.message },
       headers: {},
       isError: true,

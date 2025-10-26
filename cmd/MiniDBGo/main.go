@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 
 	"github.com/chzyer/readline"
 	"github.com/nconghau/MiniDBGo/internal/lsm"
@@ -15,6 +16,11 @@ func main() {
 	}
 
 	go startHttpServer(db, ":6866")
+
+	// Nếu đặt MODE=server, chỉ chạy HTTP server (không CLI)
+	if os.Getenv("MODE") == "server" {
+		select {} // block mãi mãi
+	}
 
 	fmt.Println(ColorYellow + "\nCLI Usage" + ColorReset)
 	fmt.Println(ColorCyan + " Commands:" + ColorReset)

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nconghau/MiniDBGo/internal/lsm"
+	"github.com/rs/cors"
 )
 
 // Server struct holds the DB instance
@@ -23,23 +24,27 @@ func startHttpServer(db *lsm.LSMEngine, addr string) {
 	mux := http.NewServeMux()
 
 	// --- API Endpoints with /api prefix ---
-
-	// New API endpoint to list collections
 	mux.HandleFunc("/api/_collections", s.handleGetCollections)
-
-	// API endpoint for compaction
 	mux.HandleFunc("/api/_compact", s.handleCompact)
-
-	// API for data operations (handled by handleApiRoutes)
-	// /api/{collection}/{id}
-	// /api/{collection}/_search
-	// /api/{collection}/_insertMany
 	mux.HandleFunc("/api/", s.handleApiRoutes)
+
+	// --- Cấu hình CORS ---
+	c := cors.New(cors.Options{
+		// Cho phép origin từ React app của bạn
+		AllowedOrigins:   []string{"http://localhost:3000"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
+	})
+
+	// Bọc mux của bạn bằng handler CORS
+	handler := c.Handler(mux) //
 
 	log.Printf("[HTTP] API server running on %s\n", addr)
 
 	go func() {
-		if err := http.ListenAndServe(addr, mux); err != nil {
+		// Dùng handler đã bọc CORS thay vì mux
+		if err := http.ListenAndServe(addr, handler); err != nil { // <-- SỬA ĐỔI: Dùng 'handler' thay vì 'mux'
 			log.Printf("[HTTP] ERROR: Server failed: %v\n", err)
 		}
 	}()

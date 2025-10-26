@@ -4,34 +4,29 @@
 FROM golang:1.22 AS builder
 WORKDIR /app
 
-# Copy go.mod and download deps
+# Copy dependencies
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy full source
+# Copy source code
 COPY . .
 
-# Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o MiniDBGo ./cmd/MiniDBGo
+# ✅ Build native cho ARM64 (Mac M1)
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o MiniDBGo ./cmd/MiniDBGo
 
 # ==============================
 # 🚀 Runtime stage
 # ==============================
-FROM alpine:latest
+FROM debian:bookworm-slim
 WORKDIR /app
 
-# Copy built binary
-COPY --from=builder /app/MiniDBGo /usr/local/bin/MiniDBGo
+# Install curl for healthcheck / debug
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Create data dir and fix permissions
+COPY --from=builder /app/MiniDBGo /usr/local/bin/MiniDBGo
 RUN mkdir -p /data/MiniDBGo && chmod -R 777 /data
 
-# Expose port
 EXPOSE 6866
 
-# Healthcheck (check API is alive)
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
-  CMD wget -qO- http://localhost:6866/api/_collections || exit 1
-
-# Final run command
-CMD ["sh", "-c", "mkdir -p /data/MiniDBGo && chmod -R 777 /data && MiniDBGo"]
+ENV MODE=server
+CMD ["MiniDBGo"]

@@ -9,7 +9,7 @@ MAX_RECORDS=200 # Tăng max để thấy rõ lợi ích batch
 MIN_FIELDS=8
 MAX_FIELDS=16
 # --- MỚI: Kích thước mỗi batch insert ---
-BATCH_SIZE=40
+BATCH_SIZE=30
 
 # Địa chỉ API
 API_ENDPOINT="http://localhost:6866/api"
