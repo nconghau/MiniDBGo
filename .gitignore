@@ -1,5 +1,5 @@
 # Dependencies DB
-*.sh
+# *.sh
 *.txt
 *.log
 *.db
