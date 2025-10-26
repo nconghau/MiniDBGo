@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  # ---------------------------
+  # 🗄️ MiniDBGo Database API
+  # ---------------------------
+  minidbgo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: minidbgo
+    ports:
+      - "6866:6866"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6866/api/_collections"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ---------------------------
+  # 💻 React Client UI
+  # ---------------------------
+  minidbgo-client:
+    build:
+      context: ./client/MiniDBGoClient
+      dockerfile: Dockerfile
+    container_name: minidbgo-client
+    ports:
+      - "5173:80"
+    environment:
+      - VITE_API_BASE=http://minidbgo:6866/api
+    depends_on:
+      minidbgo:
+        condition: service_healthy
+    restart: unless-stopped

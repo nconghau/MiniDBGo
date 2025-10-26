@@ -3,8 +3,8 @@
 *.txt
 *.log
 *.db
-*.log
 *.sst
+data/
 
 # Dependencies FE
 node_modules/

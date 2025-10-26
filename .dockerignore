@@ -1,0 +1,8 @@
+data/
+client/node_modules/
+client/MiniDBGoClient/node_modules/
+*.log
+*.tmp
+dist/
+.git
+.vscode

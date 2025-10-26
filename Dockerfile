@@ -1,51 +1,37 @@
-# ============================================
-# STAGE 1 — Build binary
-# ============================================
-FROM golang:1.22-alpine AS builder
-
-# Install git (needed for go modules)
-RUN apk add --no-cache git
-
-# Set working directory
+# ==============================
+# 🧩 Build stage
+# ==============================
+FROM golang:1.22 AS builder
 WORKDIR /app
 
-# Copy go.mod and go.sum first for better caching
-COPY go.mod ./
-# Copy source code
+# Copy go.mod and download deps
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy full source
 COPY . .
 
-# Download dependencies
-RUN go mod tidy
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -o MiniDBGo ./cmd/MiniDBGo
 
-# Build static binary (no CGO)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /bin/minidb ./cmd/MiniDBGo
-
-# ============================================
-# STAGE 2 — Run minimal image
-# ============================================
+# ==============================
+# 🚀 Runtime stage
+# ==============================
 FROM alpine:latest
-
-# Set working directory
 WORKDIR /app
 
-# Copy compiled binary from builder
-COPY --from=builder /bin/minidb /usr/local/bin/minidb
+# Copy built binary
+COPY --from=builder /app/MiniDBGo /usr/local/bin/MiniDBGo
 
-# Create default data directory
-RUN mkdir -p /app/data/MiniDBGo
+# Create data dir and fix permissions
+RUN mkdir -p /data/MiniDBGo && chmod -R 777 /data
 
-# Set environment variables
-ENV PATH="/usr/local/bin:$PATH"
+# Expose port
+EXPOSE 6866
 
-# Optional: expose nothing (CLI app) or port if needed in future
-# EXPOSE 6866
+# Healthcheck (check API is alive)
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 \
+  CMD wget -qO- http://localhost:6866/api/_collections || exit 1
 
-# Run as non-root user for security
-RUN adduser -D minidbuser
-USER minidbuser
-
-# Default working directory (inside container)
-WORKDIR /app
-
-# Run CLI by default
-ENTRYPOINT ["minidb"]
+# Final run command
+CMD ["sh", "-c", "mkdir -p /data/MiniDBGo && chmod -R 777 /data && MiniDBGo"]
