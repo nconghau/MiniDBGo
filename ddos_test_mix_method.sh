@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # --- Cấu hình ---
-MAX_PARALLEL_JOBS=30
+MAX_PARALLEL_JOBS=100
 # DOCS_PER_REQUEST=200 # Không dùng cho insertOne
 COLLECTIONS=("test1" "test2" "test3" "test4" "test5") 
 NUM_COLLECTIONS=${#COLLECTIONS[@]}

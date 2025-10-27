@@ -59,7 +59,7 @@ func OpenLSM(dir string) (*LSMEngine, error) {
 		immutables: []*MemTable{},
 		sstDir:     sstDir,
 		seq:        1,
-		flushSize:  64 * 1024 * 1024, // 64MB
+		flushSize:  50000, // 50k record in mem
 	}
 	// replay existing WALs in walDir (*.log) - simple: replay all files lexicographically
 	walFiles, _ := os.ReadDir(walDir)

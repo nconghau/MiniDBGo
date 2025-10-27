@@ -11,10 +11,16 @@ MiniDBGo is a lightweight, educational database engine written in Go. This proje
     * `updateOne` (with `$set` operator), `deleteOne`
     * `dumpDB`, `restoreDB`, `compact`
 * **REST API**: Exposes database operations via HTTP endpoints.
-* **Web UI Client**: Includes a React-based web interface (MiniDBGo Client) for interacting with the REST API visually. 🖥️
+* **MiniDBGo Client**: Includes a React-based web interface (MiniDBGo Client) for interacting with the REST API visually. 🖥️
 * **Durability**: Data safety is ensured with a Write-Ahead Log (WAL).
 * **LSM Storage Engine**: The core is a simple but effective LSM-Tree implementation.
 * **Database Operations**: Includes `dumpDB`, `restoreDB`, and `compact`.
+
+**MiniDBGo Client:**
+![MiniDBGo Client API Tool](./static/client_tool_v1.png)
+
+**Dashboard:**
+![MiniDBGo Client Dashboard](./static/dashboard_v1.png)
 
 ## 💡 Core Architecture: How It Works (LSM-Tree)
 
@@ -62,15 +68,20 @@ Over time, many small SSTable files can be created. The `compact` command trigge
 ## 🚀 Quick Start
 
 ```bash
-### Terminal 1 ###
+### Terminal 1: Run MiniDBGo (Golang) ###
 git clone [https://github.com/nconghau/MiniDBGo](https://github.com/nconghau/MiniDBGo)
 
 cd MiniDBGo
 go run ./cmd/MiniDBGo
 
-### Terminal 2 ###
+### Terminal 2: Run MiniDBGo Client (React App) ###
 cd client/MiniDBGoClient
 yarn && yarn dev
+```
+
+```bash
+### Terminal 3: Run Docker Container ###
+docker-compose up --build -d
 ```
 
 ```bash
