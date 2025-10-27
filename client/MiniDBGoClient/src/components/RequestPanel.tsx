@@ -114,6 +114,7 @@ const DEFAULT_BODY_SEARCH = '{\n  "category": "electronics"\n}'
 const DEFAULT_BODY_INSERT_MANY =
   '[\n  {\n    "_id": "p2",\n    "name": "Mouse"\n  },\n  {\n    "_id": "p3",\n    "name": "Keyboard"\n  }\n]'
 const DEFAULT_BODY_PUT = '{\n  "name": "Laptop Pro",\n  "price": 1499\n}'
+const DEFAULT_BODY_INSERT_ONE = '{\n  "_id": "p1",\n  "name": "New Document",\n  "price": 100\n}'
 const DEFAULT_BODY_EMPTY = '{\n  \n}'
 
 // --- CẬP NHẬT: Mockup data cho "Smart Suggestions" ---
@@ -189,6 +190,14 @@ export default function RequestPanel({
     setMethod('POST')
     setPath(`/${activeCollection || '{collection}'}/_insertMany`)
     setBody(DEFAULT_BODY_INSERT_MANY)
+    setActiveTab('body')
+    setJsonError(null)
+  }
+
+  const handleHelperInsertOne = () => {
+    setMethod('POST')
+    setPath(`/${activeCollection || '{collection}'}`) // KHÔNG có /_insertMany
+    setBody(DEFAULT_BODY_INSERT_ONE) // Body BẮT BUỘC phải có _id
     setActiveTab('body')
     setJsonError(null)
   }
@@ -288,21 +297,19 @@ export default function RequestPanel({
       >
         <button
           onClick={() => setActiveTab('params_headers')}
-          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${
-            activeTab === 'params_headers'
-              ? 'active'
-              : 'text-slate-600 hover:text-slate-800'
-          }`}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${activeTab === 'params_headers'
+            ? 'active'
+            : 'text-slate-600 hover:text-slate-800'
+            }`}
         >
           Params / Headers
         </button>
         <button
           onClick={() => setActiveTab('body')}
-          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${
-            activeTab === 'body'
-              ? 'active'
-              : 'text-slate-600 hover:text-slate-800'
-          }`}
+          className={`sub-tab-button py-3 px-4 text-sm font-medium focus:outline-none ${activeTab === 'body'
+            ? 'active'
+            : 'text-slate-600 hover:text-slate-800'
+            }`}
         >
           Body / Suggestions
         </button>
@@ -370,11 +377,10 @@ export default function RequestPanel({
 
             {/* --- CẬP NHẬT: Logic border (dùng slate) --- */}
             <div
-              className={`editor-container w-full h-64 bg-slate-50 rounded-md overflow-hidden transition-colors ${
-                jsonError
-                  ? 'border-2 border-red-500' // Lỗi: border đỏ dày
-                  : 'border border-slate-300 focus-within:border-primary-500 focus-within:border-2' // Mặc định: border xám, Focus: border tím
-              }`}
+              className={`editor-container w-full h-64 bg-slate-50 rounded-md overflow-hidden transition-colors ${jsonError
+                ? 'border-2 border-red-500' // Lỗi: border đỏ dày
+                : 'border border-slate-300 focus-within:border-primary-500 focus-within:border-2' // Mặc định: border xám, Focus: border tím
+                }`}
             >
               <Editor
                 value={body}
@@ -437,13 +443,19 @@ export default function RequestPanel({
                 className="w-full max-w-xs px-3 py-2 text-sm font-mono bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-0 focus:border-primary-500"
               />
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+            <div className="grid grid-cols-3 lg:grid-cols-6 gap-2">
               <button
                 onClick={handleHelperGet}
                 className="px-3 py-2 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-green-500"
               >
                 {' '}
                 GET{' '}
+              </button>
+              <button
+                onClick={handleHelperInsertOne}
+                className="px-3 py-2 text-sm font-medium text-cyan-700 bg-cyan-100 rounded-md hover:bg-cyan-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-cyan-500"
+              >
+                POST
               </button>
               <button
                 onClick={handleHelperPut}
@@ -464,14 +476,14 @@ export default function RequestPanel({
                 className="px-3 py-2 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-blue-500"
               >
                 {' '}
-                _search{' '}
+                SEARCH{' '}
               </button>
               <button
                 onClick={handleHelperInsertMany}
                 className="px-3 py-2 text-sm font-medium text-purple-700 bg-purple-100 rounded-md hover:bg-purple-200 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-purple-500"
               >
                 {' '}
-                _insertMany{' '}
+                INSERT MANY{' '}
               </button>
             </div>
           </div>

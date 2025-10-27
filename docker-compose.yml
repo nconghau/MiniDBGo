@@ -22,6 +22,12 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6866/api/health"]
+      interval: 30s     
+      timeout: 10s     
+      retries: 3       
+      start_period: 15s 
 
   minidbgo-client:
     platform: linux/arm64
@@ -34,7 +40,8 @@ services:
     ports:
       - "3000:80"
     depends_on:
-      - minidbgo
+      minidbgo:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:

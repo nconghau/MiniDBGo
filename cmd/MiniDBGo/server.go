@@ -2,18 +2,26 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log" // Use standard logger instead of fmt for production
+	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
+
+	"os"
+	"runtime"
 
 	"github.com/nconghau/MiniDBGo/internal/lsm"
 	"github.com/rs/cors"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
+	"github.com/shirou/gopsutil/v3/process"
 )
 
-// Server struct holds the DB instance
 type Server struct {
 	db *lsm.LSMEngine
 }
@@ -24,27 +32,27 @@ func startHttpServer(db *lsm.LSMEngine, addr string) {
 	mux := http.NewServeMux()
 
 	// --- API Endpoints with /api prefix ---
+	mux.HandleFunc("/api/health", s.handleHealthCheck)
+	mux.HandleFunc("/api/stats", s.handleGetStats)
 	mux.HandleFunc("/api/_collections", s.handleGetCollections)
 	mux.HandleFunc("/api/_compact", s.handleCompact)
 	mux.HandleFunc("/api/", s.handleApiRoutes)
 
-	// --- Cấu hình CORS ---
+	// --- CORS ---
 	c := cors.New(cors.Options{
-		// Cho phép origin từ React app của bạn
 		AllowedOrigins:   []string{"http://localhost:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
 	})
 
-	// Bọc mux của bạn bằng handler CORS
-	handler := c.Handler(mux) //
+	handler := c.Handler(mux)
 
 	log.Printf("[HTTP] API server running on %s\n", addr)
 
 	go func() {
 		// Dùng handler đã bọc CORS thay vì mux
-		if err := http.ListenAndServe(addr, handler); err != nil { // <-- SỬA ĐỔI: Dùng 'handler' thay vì 'mux'
+		if err := http.ListenAndServe(addr, handler); err != nil {
 			log.Printf("[HTTP] ERROR: Server failed: %v\n", err)
 		}
 	}()
@@ -69,6 +77,10 @@ func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
 	// POST /{collection}/_search
 	case r.Method == "POST" && len(parts) == 2 && parts[1] == "_search":
 		s.handleFindMany(w, r, parts[0]) // parts[0] is the collection name
+
+	// POST /{collection} (InsertOne)
+	case r.Method == "POST" && len(parts) == 1:
+		s.handleInsertOne(w, r, parts[0])
 
 	// Handle document routes: /{collection}/{id}
 	case len(parts) == 2:
@@ -107,7 +119,6 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Sử dụng map để đếm và tính tổng dung lượng
 	colCounts := make(map[string]int)
 	colSizes := make(map[string]int64) // Dùng int64 cho kích thước (bytes)
 
@@ -115,10 +126,8 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 		if idx := strings.Index(k, ":"); idx >= 0 {
 			colName := k[:idx]
 
-			// 1. Đếm số lượng (như cũ)
 			colCounts[colName]++
 
-			// 2. Lấy value và tính dung lượng (PHẦN GÂY CHẬM)
 			val, err := s.db.Get([]byte(k))
 			if err == nil {
 				colSizes[colName] += int64(len(val))
@@ -126,17 +135,15 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Chuyển map thành một slice các struct CollectionInfo
 	colsInfo := make([]CollectionInfo, 0, len(colCounts))
 	for colName, count := range colCounts {
 		colsInfo = append(colsInfo, CollectionInfo{
 			Name:     colName,
 			DocCount: count,
-			ByteSize: colSizes[colName], // Lấy tổng dung lượng từ map
+			ByteSize: colSizes[colName],
 		})
 	}
 
-	// Sắp xếp theo tên để API trả về nhất quán
 	sort.Slice(colsInfo, func(i, j int) bool {
 		return colsInfo[i].Name < colsInfo[j].Name
 	})
@@ -144,7 +151,40 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, colsInfo)
 }
 
-// handleInsertMany inserts multiple documents into a collection
+func (s *Server) handleInsertOne(w http.ResponseWriter, r *http.Request, collection string) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+	defer r.Body.Close()
+
+	var doc map[string]interface{}
+	if err := json.Unmarshal(body, &doc); err != nil {
+		writeError(w, http.StatusBadRequest, "Request body is not valid JSON object")
+		return
+	}
+
+	// Yêu cầu phải có _id
+	id, ok := doc["_id"].(string)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "Document is missing required _id (string) field")
+		return
+	}
+
+	key := []byte(collection + ":" + id)
+
+	// (Lưu ý: Giống như các hàm khác, hàm này thực hiện "upsert")
+	if err := s.db.Put(key, body); err != nil {
+		msg := fmt.Sprintf("Error inserting document %s: %v", id, err)
+		writeError(w, http.StatusInternalServerError, msg)
+		return
+	}
+
+	// Trả về 201 Created (thay vì 200 OK như PUT)
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"status": "created", "key": string(key)})
+}
+
 func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var docs []map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&docs); err != nil {
@@ -267,6 +307,78 @@ func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "compaction complete"})
+}
+
+func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func getContainerMemoryLimitMB() (float64, error) {
+	// Thử cgroups v1 (phổ biến)
+	if b, err := os.ReadFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); err == nil {
+		s := strings.TrimSpace(string(b))
+		val, err := strconv.ParseUint(s, 10, 64)
+		// Kiểm tra giá trị "khổng lồ" (nghĩa là không giới hạn)
+		if err == nil && val < (1<<60) {
+			return float64(val) / 1024 / 1024, nil // Chuyển bytes sang MB
+		}
+	}
+
+	// Thử cgroups v2
+	if b, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
+		s := strings.TrimSpace(string(b))
+		if s != "max" { // "max" nghĩa là không giới hạn
+			val, err := strconv.ParseUint(s, 10, 64)
+			if err == nil {
+				return float64(val) / 1024 / 1024, nil // Chuyển bytes sang MB
+			}
+		}
+	}
+
+	// Fallback: Lấy tổng RAM của HOST (không lý tưởng, nhưng tốt hơn là 0)
+	v, err := mem.VirtualMemory()
+	if err == nil {
+		return float64(v.Total) / 1024 / 1024, nil
+	}
+
+	return 0, errors.New("could not determine memory limit")
+}
+
+func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
+	p, err := process.NewProcess(int32(os.Getpid()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to get process info")
+		return
+	}
+
+	// === SỬA DÒNG NÀY ===
+	// Đo CPU của process trong 1 giây (blocking)
+	cpuPercent, _ := p.Percent(time.Second * 1)
+
+	memInfo, _ := p.MemoryInfo()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	// === SỬA DÒNG NÀY ===
+	// Đo CPU tổng hệ thống trong 1 giây (blocking)
+	totalCpuPercent, _ := cpu.Percent(time.Second*1, false)
+
+	memLimitMB, _ := getContainerMemoryLimitMB()
+
+	stats := map[string]interface{}{
+		"process_cpu_percent":  cpuPercent,
+		"process_rss_mb":       memInfo.RSS / 1024 / 1024,
+		"process_rss_limit_mb": memLimitMB,
+		"go_num_goroutine":     runtime.NumGoroutine(),
+		"go_alloc_mb":          m.Alloc / 1024 / 1024,
+		"system_cpu_percent":   0,
+	}
+
+	if len(totalCpuPercent) > 0 {
+		stats["system_cpu_percent"] = totalCpuPercent[0]
+	}
+
+	writeJSON(w, http.StatusOK, stats)
 }
 
 // writeJSON streams a JSON response.

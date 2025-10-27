@@ -82,7 +82,13 @@ func main() {
 	fmt.Println("  curl http://localhost:6866/api/products/p1")
 
 	// curl -X PUT -d '{"_id":"p1","name":"Laptop Pro","price":1500}' http://localhost:6866/api/products/p1
-	fmt.Println(ColorCyan + " # Create/Update 1 document" + ColorReset)
+	fmt.Println(ColorCyan + " # Create 1 document (InsertOne)" + ColorReset)
+	fmt.Println("  curl -X POST -d '" + ColorReset + "{" +
+		ColorYellow + "\"_id\"" + ColorReset + ":" + ColorCyan + "\"p1\"" + ColorReset + "," +
+		ColorYellow + "\"name\"" + ColorReset + ":" + ColorCyan + "\"Laptop\"" + ColorReset + "," +
+		ColorYellow + "\"price\"" + ColorReset + ":" + ColorGreen + "1200" + ColorReset + "}'" +
+		" http://localhost:6866/api/products")
+	fmt.Println(ColorCyan + " # Create/Update 1 document (Upsert)" + ColorReset)
 	fmt.Println("  curl -X PUT -d '" + ColorReset + "{" +
 		ColorYellow + "\"_id\"" + ColorReset + ":" + ColorCyan + "\"p1\"" + ColorReset + "," +
 		ColorYellow + "\"name\"" + ColorReset + ":" + ColorCyan + "\"Laptop Pro\"" + ColorReset + "," +

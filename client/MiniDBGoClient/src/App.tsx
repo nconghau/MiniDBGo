@@ -4,6 +4,7 @@ import RequestPanel from './components/RequestPanel'
 import ResponsePanel from './components/ResponsePanel'
 import { fetchApi, ResponseData, KeyValueItem } from './data/api'
 import { Menu, Database } from 'lucide-react'
+import DashboardPanel from './components/DashboardPanel'
 
 export default function App() {
   const [activeCollection, setActiveCollection] = useState<string | null>(null)
@@ -64,14 +65,21 @@ export default function App() {
           setActiveCollection={setActiveCollection}
         />
 
-        {/* --- CẬP NHẬT: Gộp 2 panel vào 1 card trắng duy nhất --- */}
         <main className="flex-1 flex flex-row overflow-hidden bg-white rounded-lg shadow-sm border border-gray-200">
-          <RequestPanel
-            activeCollection={activeCollection}
-            onSend={handleSendRequest}
-            loading={loading}
-          />
-          <ResponsePanel response={response} loading={loading} />
+
+          {activeCollection === '__dashboard__' ? (
+            <DashboardPanel />
+          ) : (
+            <>
+              <RequestPanel
+                activeCollection={activeCollection}
+                onSend={handleSendRequest}
+                loading={loading}
+              />
+              <ResponsePanel response={response} loading={loading} />
+            </>
+          )}
+
         </main>
       </div>
     </div>

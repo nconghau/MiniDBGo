@@ -278,6 +278,11 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
+"@kurkle/color@^0.3.0":
+  version "0.3.4"
+  resolved "https://registry.yarnpkg.com/@kurkle/color/-/color-0.3.4.tgz#4d4ff677e1609214fc71c580125ddddd86abcabf"
+  integrity sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w==
+
 "@module-federation/error-codes@0.18.0":
   version "0.18.0"
   resolved "https://registry.yarnpkg.com/@module-federation/error-codes/-/error-codes-0.18.0.tgz#00830ece3b5b6bcda0a874a8426bcd94599bf738"
@@ -1056,6 +1061,13 @@ caniuse-lite@^1.0.30001702, caniuse-lite@^1.0.30001751:
   version "1.0.30001751"
   resolved "https://registry.yarnpkg.com/caniuse-lite/-/caniuse-lite-1.0.30001751.tgz#dacd5d9f4baeea841641640139d2b2a4df4226ad"
   integrity sha512-A0QJhug0Ly64Ii3eIqHu5X51ebln3k4yTUkY1j8drqpWHVreg/VLijN48cZ1bYPiqOQuqpkIKnzr/Ul8V+p6Cw==
+
+chart.js@^4.5.1:
+  version "4.5.1"
+  resolved "https://registry.yarnpkg.com/chart.js/-/chart.js-4.5.1.tgz#19dd1a9a386a3f6397691672231cb5fc9c052c35"
+  integrity sha512-GIjfiT9dbmHRiYi6Nl2yFCq7kkwdkp1W/lp2J99rX0yo9tgJGn3lKQATztIjb5tVtevcBtIdICNWqlq5+E8/Pw==
+  dependencies:
+    "@kurkle/color" "^0.3.0"
 
 chokidar@^3.6.0:
   version "3.6.0"
@@ -2366,6 +2378,11 @@ react-base16-styling@^0.6.0:
     lodash.curry "^4.0.1"
     lodash.flow "^3.3.0"
     pure-color "^1.2.0"
+
+react-chartjs-2@^5.3.0:
+  version "5.3.0"
+  resolved "https://registry.yarnpkg.com/react-chartjs-2/-/react-chartjs-2-5.3.0.tgz#2d3286339a742bc7f77b5829c33ebab215f714cc"
+  integrity sha512-UfZZFnDsERI3c3CZGxzvNJd02SHjaSJ8kgW1djn65H1KK8rehwTjyrRKOG3VTMG8wtHZ5rgAO5oTHtHi9GCCmw==
 
 react-dom@^18.2.0:
   version "18.3.1"
