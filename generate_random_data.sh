@@ -9,7 +9,7 @@ MAX_RECORDS=200 # Tăng max để thấy rõ lợi ích batch
 MIN_FIELDS=8
 MAX_FIELDS=16
 # --- MỚI: Kích thước mỗi batch insert ---
-BATCH_SIZE=30
+BATCH_SIZE=20
 
 # Địa chỉ API
 API_ENDPOINT="http://localhost:6866/api"
@@ -90,7 +90,7 @@ generate_oid() {
 }
 
 
-# --- Vòng lặp chính để tạo collections ---
+# --- Vòng lặp chính để tạo collections (ĐÃ SỬA ĐỔI) ---
 created_collections=()
 for (( c=1; c<=$COLLECTION_COUNT; c++ )); do
 
@@ -102,46 +102,67 @@ for (( c=1; c<=$COLLECTION_COUNT; c++ )); do
   record_count=$(($RANDOM % ($MAX_RECORDS - $MIN_RECORDS + 1) + $MIN_RECORDS))
   field_count=$(($RANDOM % ($MAX_FIELDS - $MIN_FIELDS + 1) + $MIN_FIELDS))
 
-  echo "Generating ${record_count} records for collection '${collection_name}' with ~${field_count} fields..."
+  echo "Generating and sending ${record_count} records for collection '${collection_name}'..."
 
   # Chọn ngẫu nhiên các field (Giữ nguyên)
   selected_field_indices=()
   selected_fields_info=()
   while [ ${#selected_field_indices[@]} -lt $field_count ]; do random_index=$(($RANDOM % $num_possible_fields)); is_duplicate=false; for index in "${selected_field_indices[@]}"; do if [[ $index -eq $random_index ]]; then is_duplicate=true; break; fi; done; if ! $is_duplicate; then selected_field_indices+=($random_index); selected_fields_info+=("${POSSIBLE_FIELDS[$random_index]}"); fi; done
 
-  # Tạo TẤT CẢ document JSON vào mảng trước
-  all_docs=()
-  oids_generated=()
-  echo "Generating JSON documents..."
-  for (( i=1; i<=$record_count; i++ )); do
-    oid=$(generate_oid)
-    oids_generated+=("$oid")
-    echo -n "." >&2 # In dấu chấm ra stderr để biểu thị tiến trình
-    json_doc="{\"_id\":\"${oid}\""
-
-    for field_info in "${selected_fields_info[@]}"; do
-      field_name=$(echo $field_info | cut -d: -f1)
-      if [[ "$field_name" == "_id" ]]; then continue; fi
-      fake_data=$(generate_fake_data "$field_info")
-      json_doc+=",\"${field_name}\":${fake_data}"
-    done
-    json_doc+="}"
-    all_docs+=("$json_doc") # Thêm JSON doc (chuỗi) vào mảng
-  done
-  echo "" >&2 # Xuống dòng sau khi in dấu chấm xong
-
-  # Vòng lặp gửi theo batch
+  # --- VÒNG LẶP MỚI: Tạo và Gửi theo Batch ---
+  
+  # Tính toán tổng số batch
   num_batches=$(( ($record_count + $BATCH_SIZE - 1) / $BATCH_SIZE ))
-  echo "Sending ${record_count} records in ${num_batches} batches..."
+  current_record_index=0 # Theo dõi tổng số record đã tạo
+
+  echo "Total records: ${record_count}. Total batches: ${num_batches}."
 
   for (( b=0; b<$num_batches; b++ )); do
-    batch_start_index=$(( $b * $BATCH_SIZE ))
-    current_batch_docs=("${all_docs[@]:$batch_start_index:$BATCH_SIZE}")
-    batch_payload="[$(IFS=,; echo "${current_batch_docs[*]}")]"
+    
+    # Tính toán số lượng record cho batch này
+    remaining_records=$(( $record_count - $current_record_index ))
+    if [ $remaining_records -gt $BATCH_SIZE ]; then
+      current_batch_size=$BATCH_SIZE
+    else
+      current_batch_size=$remaining_records
+    fi
+
+    if [ $current_batch_size -le 0 ]; then
+      continue # Đề phòng
+    fi
+
+    batch_docs=()
+    first_oid_in_batch=""
+
+    # 1. TẠO DATA: Chỉ tạo đủ JSON cho batch này
+    echo -n "Generating ${current_batch_size} documents for batch $(($b + 1))... " >&2
+    for (( i=0; i<$current_batch_size; i++ )); do
+      oid=$(generate_oid)
+      if [ $i -eq 0 ]; then
+        first_oid_in_batch=$oid
+      fi
+      
+      json_doc="{\"_id\":\"${oid}\""
+
+      for field_info in "${selected_fields_info[@]}"; do
+        field_name=$(echo $field_info | cut -d: -f1)
+        if [[ "$field_name" == "_id" ]]; then continue; fi
+        fake_data=$(generate_fake_data "$field_info")
+        json_doc+=",\"${field_name}\":${fake_data}"
+      done
+      json_doc+="}"
+      batch_docs+=("$json_doc") # Thêm JSON doc (chuỗi) vào mảng batch
+    done
+    echo "Done." >&2
+
+    # 2. GỬI API: Gửi batch vừa tạo ngay lập tức
+    batch_payload="[$(IFS=,; echo "${batch_docs[*]}")]"
 
     batch_num=$(( $b + 1 ))
-    record_start=$(( $batch_start_index + 1 ))
-    record_end=$(( $batch_start_index + ${#current_batch_docs[@]} ))
+    record_start=$(( $current_record_index + 1 ))
+    record_end=$(( $current_record_index + $current_batch_size ))
+    
+    current_record_index=$record_end # Cập nhật tổng số record đã xử lý
 
     echo -n "Sending batch ${batch_num}/${num_batches} (records ${record_start}-${record_end})... "
 
@@ -156,7 +177,6 @@ for (( c=1; c<=$COLLECTION_COUNT; c++ )); do
     rm "$temp_time_file" # Xóa file tạm
 
     # Chỉ hiển thị response và thời gian, ID đầu tiên của batch
-    first_oid_in_batch=${oids_generated[$batch_start_index]:-(N/A)}
     printf "Done. Response: %s | First ID: %s | Time: %.3fs\n" "$response_body" "$first_oid_in_batch" "$calculated_real_time"
 
   done
