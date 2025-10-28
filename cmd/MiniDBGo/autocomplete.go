@@ -16,7 +16,8 @@ var allCommands = []string{
 	"dumpAll", "dumpDB", "restoreDB", "compact", "exit",
 }
 
-// Do is called by chzyer/readline. `line` is full buffer as runes, `pos` is cursor position.
+// Do is called by chzyer/readline.
+// `line` is full buffer as runes, `pos` is cursor position.
 // We must compute the current token (based on pos) and return completions plus number of chars to replace.
 func (c completer) Do(line []rune, pos int) ([][]rune, int) {
 	s := string(line)
@@ -80,8 +81,11 @@ func (c completer) Do(line []rune, pos int) ([][]rune, int) {
 			return nil, 0
 		}
 
-		// gather collection names from DB (using keys of form "collection:id")
-		keys, _ := c.db.IterKeys()
+		// --- ⬇️  FIXED: Use memory-safe IterKeysWithLimit ⬇️ ---
+		// Use a large limit, same as other CLI commands.
+		keys, _ := c.db.IterKeysWithLimit(10000)
+		// --- ⬆️  END FIX ⬆️ ---
+
 		colSet := map[string]struct{}{}
 		for _, k := range keys {
 			if idx := strings.Index(k, ":"); idx >= 0 {

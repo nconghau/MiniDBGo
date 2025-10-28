@@ -124,11 +124,22 @@ func handleFindMany(db *lsm.LSMEngine, rest string) {
 		return
 	}
 
-	keys, _ := db.IterKeys()
+	// --- FIX: Use IterKeysWithLimit to prevent OOM ---
+	// Use a large limit for CLI, same as server's MaxKeysToReturn
+	keys, _ := db.IterKeysWithLimit(10000)
+
+	matchCount := 0
 	for _, k := range keys {
 		if !strings.HasPrefix(k, col+":") {
 			continue
 		}
+
+		// --- FIX: Limit number of results returned ---
+		if matchCount >= 1000 { // Same limit as server [cite: 41]
+			fmt.Println("... (results truncated at 1000)")
+			break
+		}
+
 		val, err := db.Get([]byte(k))
 		if err != nil {
 			continue
@@ -139,6 +150,7 @@ func handleFindMany(db *lsm.LSMEngine, rest string) {
 		}
 		if matchFilter(doc, filter) {
 			fmt.Println(prettyJSON(val))
+			matchCount++
 		}
 	}
 }
@@ -229,12 +241,22 @@ func handleDumpAll(db *lsm.LSMEngine, rest string) {
 	}
 	col := parts[0]
 
-	keys, _ := db.IterKeys()
+	// --- FIX: Use IterKeysWithLimit to prevent OOM ---
+	keys, _ := db.IterKeysWithLimit(10000) // Use a large limit
+
+	matchCount := 0
 	for _, k := range keys {
 		if strings.HasPrefix(k, col+":") {
+			// --- FIX: Limit number of results returned ---
+			if matchCount >= 1000 {
+				fmt.Println("... (results truncated at 1000)")
+				break
+			}
+
 			val, err := db.Get([]byte(k))
 			if err == nil {
 				fmt.Println(prettyJSON(val))
+				matchCount++
 			}
 		}
 	}

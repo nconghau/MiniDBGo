@@ -13,15 +13,19 @@ services:
       - ./data:/data
     environment:
       - MODE=server
+      - GOMEMLIMIT=128MiB    # Crucial: Go runtime memory limit 
+      - MAX_MEM_MB=25        # Smaller memtable 
+      - FLUSH_SIZE=5000      # Flush more frequently 
+      - GOGC=30              # More aggressive garbage collection
     restart: unless-stopped
     deploy:
       resources:
         limits:
-          cpus: "1.0"        
-          memory: 1G        
+          cpus: "1.0"
+          memory: 256M     # Hard limit for the container
         reservations:
           cpus: "0.5"
-          memory: 512M
+          memory: 128M     # Reserve this amount
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6866/api/health"]
       interval: 30s     

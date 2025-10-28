@@ -45,11 +45,17 @@ func (e *LSMEngine) Compact() error {
 	}
 
 	// write new SST
+	e.mu.Lock() // Protect access to e.seq
 	e.seq++
-	newPath, err := WriteSST(e.sstDir, 1, e.seq, clean)
+	seq := e.seq
+	e.mu.Unlock()
+
+	newPath, err := WriteSST(e.sstDir, 1, seq, clean)
 	if err != nil {
 		return err
 	}
+
+	e.metrics.compacts.Add(1)
 
 	// delete old files
 	for _, p := range ssts {

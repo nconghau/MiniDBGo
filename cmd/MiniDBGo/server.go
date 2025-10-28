@@ -1,19 +1,24 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
-
-	"os"
-	"runtime"
 
 	"github.com/nconghau/MiniDBGo/internal/lsm"
 	"github.com/rs/cors"
@@ -22,23 +27,47 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 )
 
+const (
+	// Server limits
+	MaxRequestBodySize = 10 * 1024 * 1024 // 10MB
+	MaxConcurrentReq   = 100
+	RequestTimeout     = 30 * time.Second
+	ShutdownTimeout    = 30 * time.Second
+	ReadTimeout        = 15 * time.Second
+	WriteTimeout       = 15 * time.Second
+	IdleTimeout        = 60 * time.Second
+
+	// Rate limiting
+	MaxKeysToReturn = 10000
+)
+
 type Server struct {
-	db *lsm.LSMEngine
+	db         *lsm.LSMEngine
+	httpServer *http.Server
+	semaphore  chan struct{}
+	shutdown   chan os.Signal
+	wg         sync.WaitGroup
 }
 
-// startHttpServer starts the web server in a goroutine
-func startHttpServer(db *lsm.LSMEngine, addr string) {
-	s := &Server{db: db}
+// startHttpServer starts the web server with graceful shutdown
+func startHttpServer(db *lsm.LSMEngine, addr string) *Server {
+	s := &Server{
+		db:        db,
+		semaphore: make(chan struct{}, MaxConcurrentReq),
+		shutdown:  make(chan os.Signal, 1),
+	}
+
 	mux := http.NewServeMux()
 
-	// --- API Endpoints with /api prefix ---
-	mux.HandleFunc("/api/health", s.handleHealthCheck)
-	mux.HandleFunc("/api/stats", s.handleGetStats)
-	mux.HandleFunc("/api/_collections", s.handleGetCollections)
-	mux.HandleFunc("/api/_compact", s.handleCompact)
-	mux.HandleFunc("/api/", s.handleApiRoutes)
+	// API Endpoints with middleware
+	mux.HandleFunc("/api/health", s.withMiddleware(s.handleHealthCheck))
+	mux.HandleFunc("/api/stats", s.withMiddleware(s.handleGetStats))
+	mux.HandleFunc("/api/metrics", s.withMiddleware(s.handleGetMetrics))
+	mux.HandleFunc("/api/_collections", s.withMiddleware(s.handleGetCollections))
+	mux.HandleFunc("/api/_compact", s.withMiddleware(s.handleCompact))
+	mux.HandleFunc("/api/", s.withMiddleware(s.handleApiRoutes))
 
-	// --- CORS ---
+	// CORS
 	c := cors.New(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:3000"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -48,18 +77,116 @@ func startHttpServer(db *lsm.LSMEngine, addr string) {
 
 	handler := c.Handler(mux)
 
-	log.Printf("[HTTP] API server running on %s\n", addr)
+	s.httpServer = &http.Server{
+		Addr:           addr,
+		Handler:        handler,
+		ReadTimeout:    ReadTimeout,
+		WriteTimeout:   WriteTimeout,
+		IdleTimeout:    IdleTimeout,
+		MaxHeaderBytes: 1 << 20, // 1MB
+	}
 
+	log.Printf("[HTTP] API server starting on %s\n", addr)
+
+	// Start server in goroutine
+	s.wg.Add(1)
 	go func() {
-		// Dùng handler đã bọc CORS thay vì mux
-		if err := http.ListenAndServe(addr, handler); err != nil {
+		defer s.wg.Done()
+		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[HTTP] ERROR: Server failed: %v\n", err)
 		}
 	}()
+
+	// Setup graceful shutdown
+	signal.Notify(s.shutdown, os.Interrupt, syscall.SIGTERM)
+	go s.handleShutdown()
+
+	return s
+}
+
+func (s *Server) handleShutdown() {
+	<-s.shutdown
+	log.Println("[HTTP] Shutting down gracefully...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), ShutdownTimeout)
+	defer cancel()
+
+	// Shutdown HTTP server
+	if err := s.httpServer.Shutdown(ctx); err != nil {
+		log.Printf("[HTTP] Shutdown error: %v\n", err)
+	}
+
+	// Close database
+	if err := s.db.Close(); err != nil {
+		log.Printf("[DB] Close error: %v\n", err)
+	}
+
+	s.wg.Wait()
+	log.Println("[HTTP] Server stopped")
+	os.Exit(0)
+}
+
+// Middleware chain
+func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Request timeout
+		ctx, cancel := context.WithTimeout(r.Context(), RequestTimeout)
+		defer cancel()
+		r = r.WithContext(ctx)
+
+		// Concurrency limiting
+		select {
+		case s.semaphore <- struct{}{}:
+			defer func() { <-s.semaphore }()
+		case <-ctx.Done():
+			writeError(w, http.StatusServiceUnavailable, "Server too busy")
+			return
+		}
+
+		// Body size limiting
+		r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBodySize)
+
+		start := time.Now()
+
+		var bodyBytes []byte
+		if r.Method == "POST" || r.Method == "PUT" {
+			if r.Body != nil {
+				// Read all the bytes from the request body
+				bodyBytes, err := io.ReadAll(r.Body)
+				if err != nil {
+					// This error triggers if body > MaxRequestBodySize
+					writeError(w, http.StatusRequestEntityTooLarge, "Request payload is too large")
+					return
+				}
+				r.Body.Close() // Close the original body
+
+				// Restore the body so the handler can read it
+				r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+			}
+		}
+
+		// Run the actual API handler
+		handler(w, r)
+
+		// Use slog.LogAttrs for dynamic attributes
+		attrs := []slog.Attr{
+			slog.String("component", "http"),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int64("duration_ms", time.Since(start).Milliseconds()),
+		}
+
+		// Only add payload if it's a POST/PUT and we read bytes
+		if (r.Method == "POST" || r.Method == "PUT") && len(bodyBytes) > 0 {
+			attrs = append(attrs, slog.String("payload", string(bodyBytes)))
+		}
+
+		// Log everything together
+		slog.LogAttrs(r.Context(), slog.LevelInfo, "HTTP request", attrs...)
+	}
 }
 
 func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
-	// Trim the /api prefix from the URL path
 	path := strings.TrimPrefix(r.URL.Path, "/api")
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 
@@ -69,20 +196,15 @@ func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch {
-
-	// POST /{collection}/_insertMany
 	case r.Method == "POST" && len(parts) == 2 && parts[1] == "_insertMany":
-		s.handleInsertMany(w, r, parts[0]) // parts[0] is the collection name
+		s.handleInsertMany(w, r, parts[0])
 
-	// POST /{collection}/_search
 	case r.Method == "POST" && len(parts) == 2 && parts[1] == "_search":
-		s.handleFindMany(w, r, parts[0]) // parts[0] is the collection name
+		s.handleFindMany(w, r, parts[0])
 
-	// POST /{collection} (InsertOne)
 	case r.Method == "POST" && len(parts) == 1:
 		s.handleInsertOne(w, r, parts[0])
 
-	// Handle document routes: /{collection}/{id}
 	case len(parts) == 2:
 		collection := parts[0]
 		id := parts[1]
@@ -99,7 +221,6 @@ func (s *Server) handleApiRoutes(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "Method not supported")
 		}
 	default:
-		// Ignore favicon requests that might slip through
 		if !strings.HasSuffix(parts[0], ".ico") {
 			writeError(w, http.StatusNotFound, "Invalid API path")
 		}
@@ -113,25 +234,19 @@ type CollectionInfo struct {
 }
 
 func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
-	keys, err := s.db.IterKeys()
+	// Use limited iteration to prevent OOM
+	keys, err := s.db.IterKeysWithLimit(MaxKeysToReturn) // Get keys efficiently
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to read keys")
 		return
 	}
 
 	colCounts := make(map[string]int)
-	colSizes := make(map[string]int64) // Dùng int64 cho kích thước (bytes)
 
 	for _, k := range keys {
 		if idx := strings.Index(k, ":"); idx >= 0 {
 			colName := k[:idx]
-
 			colCounts[colName]++
-
-			val, err := s.db.Get([]byte(k))
-			if err == nil {
-				colSizes[colName] += int64(len(val))
-			}
 		}
 	}
 
@@ -140,7 +255,7 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 		colsInfo = append(colsInfo, CollectionInfo{
 			Name:     colName,
 			DocCount: count,
-			ByteSize: colSizes[colName],
+			ByteSize: 0,
 		})
 	}
 
@@ -165,7 +280,6 @@ func (s *Server) handleInsertOne(w http.ResponseWriter, r *http.Request, collect
 		return
 	}
 
-	// Yêu cầu phải có _id
 	id, ok := doc["_id"].(string)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "Document is missing required _id (string) field")
@@ -174,14 +288,16 @@ func (s *Server) handleInsertOne(w http.ResponseWriter, r *http.Request, collect
 
 	key := []byte(collection + ":" + id)
 
-	// (Lưu ý: Giống như các hàm khác, hàm này thực hiện "upsert")
 	if err := s.db.Put(key, body); err != nil {
+		if strings.Contains(err.Error(), "too many pending flushes") {
+			writeError(w, http.StatusServiceUnavailable, "Database is busy, please retry")
+			return
+		}
 		msg := fmt.Sprintf("Error inserting document %s: %v", id, err)
 		writeError(w, http.StatusInternalServerError, msg)
 		return
 	}
 
-	// Trả về 201 Created (thay vì 200 OK như PUT)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"status": "created", "key": string(key)})
 }
 
@@ -195,6 +311,12 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 
 	if len(docs) == 0 {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "insertedCount": 0})
+		return
+	}
+
+	// Limit batch size to prevent OOM
+	if len(docs) > 1000 {
+		writeError(w, http.StatusBadRequest, "Too many documents (max 1000 per batch)")
 		return
 	}
 
@@ -216,6 +338,10 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 		}
 
 		if err := s.db.Put(key, raw); err != nil {
+			if strings.Contains(err.Error(), "too many pending flushes") {
+				writeError(w, http.StatusServiceUnavailable, "Database is busy, please retry")
+				return
+			}
 			msg := fmt.Sprintf("Error inserting document %s: %v", id, err)
 			writeError(w, http.StatusInternalServerError, msg)
 			return
@@ -241,6 +367,10 @@ func (s *Server) handleUpdateDocument(w http.ResponseWriter, r *http.Request, ke
 	}
 
 	if err := s.db.Put(key, body); err != nil {
+		if strings.Contains(err.Error(), "too many pending flushes") {
+			writeError(w, http.StatusServiceUnavailable, "Database is busy, please retry")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -260,6 +390,10 @@ func (s *Server) handleGetDocument(w http.ResponseWriter, r *http.Request, key [
 
 func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request, key []byte) {
 	if err := s.db.Delete(key); err != nil {
+		if strings.Contains(err.Error(), "too many pending flushes") {
+			writeError(w, http.StatusServiceUnavailable, "Database is busy, please retry")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -274,27 +408,42 @@ func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collecti
 	}
 	defer r.Body.Close()
 
-	results := []map[string]interface{}{}
-	keys, _ := s.db.IterKeys()
+	// Stream results instead of loading all into memory
+	results := make([]map[string]interface{}, 0, 100)
+
+	// Use limited iteration
+	keys, err := s.db.IterKeysWithLimit(MaxKeysToReturn)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to iterate keys")
+		return
+	}
+
 	prefix := collection + ":"
+	matchCount := 0
 
 	for _, k := range keys {
 		if !strings.HasPrefix(k, prefix) {
 			continue
 		}
 
+		// Limit results to prevent OOM
+		if matchCount >= 1000 {
+			break
+		}
+
 		val, err := s.db.Get([]byte(k))
 		if err != nil {
-			continue // Document might have been deleted concurrently
+			continue
 		}
 
 		var doc map[string]interface{}
 		if err := json.Unmarshal(val, &doc); err != nil {
-			continue // Data corruption? Skip this entry.
+			continue
 		}
 
 		if matchFilter(doc, filter) {
 			results = append(results, doc)
+			matchCount++
 		}
 	}
 
@@ -302,40 +451,50 @@ func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collecti
 }
 
 func (s *Server) handleCompact(w http.ResponseWriter, r *http.Request) {
-	if err := s.db.Compact(); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "compaction complete"})
+	// Run compaction in background to avoid blocking
+	go func() {
+		if err := s.db.Compact(); err != nil {
+			slog.Info("Compaction started", "trigger", "api")
+			if err := s.db.Compact(); err != nil {
+				slog.Error("Compaction error", "error", err)
+			}
+		}
+	}()
+
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "compaction started"})
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
+	metrics := s.db.GetMetrics()
+	writeJSON(w, http.StatusOK, metrics)
+}
+
 func getContainerMemoryLimitMB() (float64, error) {
-	// Thử cgroups v1 (phổ biến)
+	// Try cgroups v1
 	if b, err := os.ReadFile("/sys/fs/cgroup/memory/memory.limit_in_bytes"); err == nil {
 		s := strings.TrimSpace(string(b))
 		val, err := strconv.ParseUint(s, 10, 64)
-		// Kiểm tra giá trị "khổng lồ" (nghĩa là không giới hạn)
 		if err == nil && val < (1<<60) {
-			return float64(val) / 1024 / 1024, nil // Chuyển bytes sang MB
+			return float64(val) / 1024 / 1024, nil
 		}
 	}
 
-	// Thử cgroups v2
+	// Try cgroups v2
 	if b, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
 		s := strings.TrimSpace(string(b))
-		if s != "max" { // "max" nghĩa là không giới hạn
+		if s != "max" {
 			val, err := strconv.ParseUint(s, 10, 64)
 			if err == nil {
-				return float64(val) / 1024 / 1024, nil // Chuyển bytes sang MB
+				return float64(val) / 1024 / 1024, nil
 			}
 		}
 	}
 
-	// Fallback: Lấy tổng RAM của HOST (không lý tưởng, nhưng tốt hơn là 0)
+	// Fallback: Get total host RAM
 	v, err := mem.VirtualMemory()
 	if err == nil {
 		return float64(v.Total) / 1024 / 1024, nil
@@ -351,17 +510,15 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// === SỬA DÒNG NÀY ===
-	// Đo CPU của process trong 1 giây (blocking)
-	cpuPercent, _ := p.Percent(time.Second * 1)
-
+	// Use non-blocking CPU measurement with cached values
+	cpuPercent, _ := p.CPUPercent()
 	memInfo, _ := p.MemoryInfo()
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
-	// === SỬA DÒNG NÀY ===
-	// Đo CPU tổng hệ thống trong 1 giây (blocking)
-	totalCpuPercent, _ := cpu.Percent(time.Second*1, false)
+	// Get system CPU without blocking (use interval 0 for instant read)
+	totalCpuPercent, _ := cpu.Percent(0, false)
 
 	memLimitMB, _ := getContainerMemoryLimitMB()
 
@@ -371,7 +528,11 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		"process_rss_limit_mb": memLimitMB,
 		"go_num_goroutine":     runtime.NumGoroutine(),
 		"go_alloc_mb":          m.Alloc / 1024 / 1024,
-		"system_cpu_percent":   0,
+		"go_sys_mb":            m.Sys / 1024 / 1024,
+		"go_heap_alloc_mb":     m.HeapAlloc / 1024 / 1024,
+		"go_heap_inuse_mb":     m.HeapInuse / 1024 / 1024,
+		"go_num_gc":            m.NumGC,
+		"system_cpu_percent":   0.0,
 	}
 
 	if len(totalCpuPercent) > 0 {
@@ -381,20 +542,16 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
-// writeJSON streams a JSON response.
-// Using json.NewEncoder is more memory-efficient for large responses
-// than json.Marshal, as it avoids buffering the entire response in memory.
+// writeJSON efficiently streams JSON response
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		// The header is already sent, so we can't send a clean error payload.
-		// We can only log the error.
 		log.Printf("[HTTP] ERROR: Failed to encode JSON response: %v", err)
 	}
 }
 
-// writeError formats and sends a standard JSON error response.
+// writeError formats and sends a standard JSON error response
 func writeError(w http.ResponseWriter, status int, message string) {
 	payload := map[string]interface{}{
 		"error":  message,

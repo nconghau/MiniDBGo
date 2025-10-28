@@ -4,7 +4,7 @@ import (
 	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
-// Engine là interface chung cho DB engines
+// DB Engine interface
 type Engine interface {
 	Put(key, value []byte) error
 	Update(key, value []byte) error
@@ -14,9 +14,13 @@ type Engine interface {
 	DumpDB(path string) error
 	RestoreDB(path string) error
 	Compact() error
+
+	Close() error
+	GetMetrics() map[string]int64
+	IterKeysWithLimit(limit int) ([]string, error)
 }
 
-// Open tạo một LSMEngine làm default backend
+// Open create LSMEngine default backend
 func Open(path string) (Engine, error) {
 	return lsm.OpenLSM(path)
 }

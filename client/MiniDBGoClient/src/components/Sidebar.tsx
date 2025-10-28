@@ -137,9 +137,9 @@ export default function Sidebar({
                 <span className="text-xs text-slate-500 font-mono bg-slate-200 rounded-full px-2 py-0.5 leading-none">
                   {intFormatter.format(col.docCount)}
                 </span>
-                <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                {/* <span className="text-[10px] text-slate-400 font-mono mt-0.5">
                   {formatBytes(col.byteSize)}
-                </span>
+                </span> */}
               </div>
             </li>
           ))}
