@@ -12,7 +12,17 @@ import {
   Legend,
   Filler,
 } from 'chart.js'
-import { Loader2, Activity, Cpu, MemoryStick, Zap } from 'lucide-react'
+import {
+  Loader2,
+  Activity,
+  Cpu,
+  MemoryStick,
+  Zap,
+  Database, // MỚI
+  Package, // MỚI
+  Trash2, // MỚI
+  Recycle, // MỚI
+} from 'lucide-react'
 
 Chart.register(
   CategoryScale,
@@ -25,19 +35,17 @@ Chart.register(
   Filler,
 )
 
-// === THÊM VÀO: Bộ định dạng số theo locale vi-VN ===
-// (16384 -> "16.384")
+// Bộ định dạng số (Giữ nguyên)
 const intFormatter = new Intl.NumberFormat('vi-VN', {
   minimumFractionDigits: 0,
   maximumFractionDigits: 0,
 })
-// (73.57 -> "73,57")
 const floatFormatter = new Intl.NumberFormat('vi-VN', {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 })
-// === KẾT THÚC THÊM ===
 
+// === CẬP NHẬT: Mở rộng interface StatsData ===
 interface StatsData {
   process_cpu_percent: number
   process_rss_mb: number
@@ -45,21 +53,41 @@ interface StatsData {
   go_num_goroutine: number
   system_cpu_percent: number
   go_alloc_mb: number
+  go_heap_inuse_mb: number // MỚI
+  go_num_gc: number // MỚI
+  go_sys_mb: number // MỚI
+}
+
+// === MỚI: Interface cho /api/metrics ===
+interface EngineMetrics {
+  puts: number
+  gets: number
+  deletes: number
+  flushes: number
+  compacts: number
 }
 
 const MAX_DATA_POINTS = 30
 
 export default function DashboardPanel() {
   const [stats, setStats] = useState<StatsData | null>(null)
+  // === MỚI: State cho metrics ===
+  const [metrics, setMetrics] = useState<EngineMetrics | null>(null)
   const [history, setHistory] = useState<StatsData[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Hàm lấy dữ liệu (Giữ nguyên)
-  const fetchStats = async () => {
+  // === CẬP NHẬT: Hàm lấy dữ liệu (gọi cả 2 endpoint) ===
+  const fetchData = async () => {
     try {
-      const res = await fetchApi('GET', '/stats', null, [], [])
-      if (!res.isError) {
-        const data = res.body as StatsData
+      // Gọi song song
+      const [statsRes, metricsRes] = await Promise.all([
+        fetchApi('GET', '/stats', null, [], []),
+        fetchApi('GET', '/metrics', null, [], []), // Endpoint mới
+      ])
+
+      // Xử lý /stats
+      if (!statsRes.isError) {
+        const data = statsRes.body as StatsData
         setStats(data)
         setHistory((prev) => {
           const newHistory = [...prev, data]
@@ -69,17 +97,22 @@ export default function DashboardPanel() {
           return newHistory
         })
       }
+
+      // Xử lý /api/metrics
+      if (!metricsRes.isError) {
+        setMetrics(metricsRes.body as EngineMetrics)
+      }
     } catch (e) {
-      console.error('Failed to fetch stats:', e)
+      console.error('Failed to fetch data:', e)
     } finally {
       setLoading(false)
     }
   }
 
-  // Thiết lập Polling (Giữ nguyên)
+  // === CẬP NHẬT: Polling dùng hàm mới ===
   useEffect(() => {
-    fetchStats()
-    const intervalId = setInterval(fetchStats, 2000)
+    fetchData() // Gọi lần đầu
+    const intervalId = setInterval(fetchData, 2000) // Poll mỗi 2 giây
     return () => clearInterval(intervalId)
   }, [])
 
@@ -89,7 +122,7 @@ export default function DashboardPanel() {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { display: false },
+      legend: { display: true, position: 'bottom' as const }, // Bật legend
       tooltip: { mode: 'index' as const, intersect: false },
     },
     scales: {
@@ -125,10 +158,6 @@ export default function DashboardPanel() {
   }
   const cpuChartOptions = {
     ...baseChartOptions,
-    plugins: {
-      ...baseChartOptions.plugins,
-      legend: { display: true, position: 'bottom' as const },
-    },
     scales: {
       ...baseChartOptions.scales,
       y: {
@@ -139,15 +168,24 @@ export default function DashboardPanel() {
     },
   }
 
-  // --- Biểu đồ RAM (Giữ nguyên) ---
+  // --- CẬP NHẬT: Biểu đồ RAM (thêm Go Alloc) ---
   const ramChartData = {
     labels,
     datasets: [
       {
-        label: 'Process RAM (MB)',
+        label: 'Process RAM (RSS)',
         data: history.map((h) => h.process_rss_mb),
         borderColor: '#059669',
         backgroundColor: '#a7f3d0',
+        fill: true,
+        tension: 0.3,
+      },
+      // === MỚI: Thêm Go Alloc ===
+      {
+        label: 'Go Heap (InUse)',
+        data: history.map((h) => h.go_heap_inuse_mb),
+        borderColor: '#f59e0b',
+        backgroundColor: '#fde68a',
         fill: true,
         tension: 0.3,
       },
@@ -175,8 +213,8 @@ export default function DashboardPanel() {
       {
         label: 'Goroutines',
         data: history.map((h) => h.go_num_goroutine),
-        borderColor: '#f59e0b',
-        backgroundColor: '#fde68a',
+        borderColor: '#d946ef', // Đổi màu
+        backgroundColor: '#f5d0fe', // Đổi màu
         fill: true,
         tension: 0.3,
       },
@@ -184,6 +222,7 @@ export default function DashboardPanel() {
   }
   const goroutineChartOptions = {
     ...baseChartOptions,
+    plugins: { ...baseChartOptions.plugins, legend: { display: false } }, // Ẩn legend
     scales: {
       ...baseChartOptions.scales,
       y: {
@@ -196,10 +235,13 @@ export default function DashboardPanel() {
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6">
-      <h2 className="text-xl font-semibold text-gray-800 mb-4">Dashboard</h2>
+      <h2 className="text-xl font-semibold text-gray-800 mb-4">
+        Real-time Dashboard
+      </h2>
 
-      {/* === CẬP NHẬT: Sử dụng formatter cho các giá trị StatCard === */}
+      {/* === CẬP NHẬT: Thêm 4 thẻ StatCard mới === */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {/* Hàng 1: Chỉ số hệ thống */}
         <StatCard
           icon={Cpu}
           label="Process CPU"
@@ -220,7 +262,6 @@ export default function DashboardPanel() {
           }
           loading={loading}
         />
-
         <StatCard
           icon={MemoryStick}
           label="Process RAM (RSS)"
@@ -235,7 +276,6 @@ export default function DashboardPanel() {
           }
           loading={loading}
         />
-
         <StatCard
           icon={Activity}
           label="Goroutines"
@@ -245,9 +285,40 @@ export default function DashboardPanel() {
           loading={loading}
         />
 
+        {/* Hàng 2: Chỉ số DB (MỚI) */}
+        <StatCard
+          icon={Database} // MỚI
+          label="Total Puts"
+          value={
+            metrics ? intFormatter.format(metrics.puts) : '...'
+          }
+          loading={loading}
+        />
+        <StatCard
+          icon={Package} // MỚI
+          label="Total Gets"
+          value={
+            metrics ? intFormatter.format(metrics.gets) : '...'
+          }
+          loading={loading}
+        />
+        <StatCard
+          icon={MemoryStick} // MỚI (dùng lại icon)
+          label="Go Heap (InUse)"
+          value={
+            stats ? `${floatFormatter.format(stats.go_heap_inuse_mb)} MB` : '...'
+          }
+          loading={loading}
+        />
+        <StatCard
+          icon={Recycle} // MỚI
+          label="Total GC Cycles"
+          value={stats ? intFormatter.format(stats.go_num_gc) : '...'}
+          loading={loading}
+        />
       </div>
 
-      {/* Phần biểu đồ (GiÃ nguyên) */}
+      {/* Phần biểu đồ (Cập nhật biểu đồ RAM) */}
       <div className="space-y-4">
         <div className="h-64 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
           <h3 className="text-base font-semibold text-gray-700 mb-2">
@@ -264,7 +335,7 @@ export default function DashboardPanel() {
 
         <div className="h-64 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
           <h3 className="text-base font-semibold text-gray-700 mb-2">
-            Process RAM (RSS)
+            Memory Usage (RSS vs Go Heap)
           </h3>
           <div className="h-48">
             {loading && history.length === 0 ? (
