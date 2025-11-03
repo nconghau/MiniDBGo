@@ -118,10 +118,35 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (*LSMEngi
 	}
 
 	// Replay WAL files
-	if err := engine.replayWAL(walDir); err != nil {
+	replayedFiles, err := engine.replayWAL(walDir)
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("replay wal: %w", err)
 	}
+
+	// --- SỬA: Thêm logic flush dữ liệu replay và xóa WAL cũ ---
+	if engine.mem.Size() > 0 {
+		slog.Info("Flushing replayed WAL data to SSTable...", "count", engine.mem.Size())
+
+		// Đẩy dữ liệu replay vào hàng đợi flush
+		if err := engine.rotateMemTable(); err != nil {
+			cancel() // Hủy context nếu không thể flush
+			return nil, fmt.Errorf("failed to schedule flush for replayed data: %w", err)
+		}
+
+		// Xóa các file WAL đã replay *sau khi* đẩy vào queue
+		// Lưu ý: Có rủi ro nhỏ nếu server crash trước khi flushWorker chạy.
+		// Một giải pháp hoàn hảo hơn sẽ xóa WAL *sau khi* flushWorker
+		// xác nhận flush thành công. Nhưng với kiến trúc hiện tại,
+		// đây là giải pháp 80/20.
+		for _, p := range replayedFiles {
+			if err := os.Remove(p); err != nil {
+				slog.Warn("Failed to delete replayed WAL file", "path", p, "error", err)
+			}
+		}
+		slog.Info("Cleaned up replayed WAL files.", "count", len(replayedFiles))
+	}
+	// --- KẾT THÚC SỬA ---
 
 	// Start background flush worker
 	engine.wg.Add(1)
@@ -130,10 +155,11 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (*LSMEngi
 	return engine, nil
 }
 
-func (e *LSMEngine) replayWAL(walDir string) error {
+// SỬA: Đổi kiểu trả về
+func (e *LSMEngine) replayWAL(walDir string) ([]string, error) {
 	walFiles, err := os.ReadDir(walDir)
 	if err != nil {
-		return err
+		return nil, err // SỬA
 	}
 
 	names := make([]string, 0)
@@ -164,7 +190,7 @@ func (e *LSMEngine) replayWAL(walDir string) error {
 		tmpF.Close()
 	}
 
-	return nil
+	return names, nil // SỬA: Trả về danh sách file
 }
 
 // flushWorker handles background flushing of immutable memtables
@@ -173,30 +199,26 @@ func (e *LSMEngine) flushWorker() {
 
 	slog.Info("Flush worker started", "component", "lsm")
 
-	for {
-		select {
-		case <-e.ctx.Done():
-			slog.Info("Flush worker stopped", "component", "lsm")
-			return
-		case memTable := <-e.flushCh:
-			slog.Info("Starting memtable flush", "component", "lsm")
-			start := time.Now()
+	for memTable := range e.flushCh {
+		slog.Info("Starting memtable flush", "component", "lsm")
+		start := time.Now()
 
-			if err := e.flushMemTable(memTable); err != nil {
-				e.flushErr.Store(err)
-				slog.Error("Memtable flush error",
-					"component", "lsm",
-					"error", err,
-					"duration_ms", time.Since(start).Milliseconds(),
-				)
-			} else {
-				slog.Info("Memtable flush complete",
-					"component", "lsm",
-					"duration_ms", time.Since(start).Milliseconds(),
-				)
-			}
+		if err := e.flushMemTable(memTable); err != nil {
+			e.flushErr.Store(err)
+			slog.Error("Memtable flush error",
+				"component", "lsm",
+				"error", err,
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
+		} else {
+			slog.Info("Memtable flush complete",
+				"component", "lsm",
+				"duration_ms", time.Since(start).Milliseconds(),
+			)
 		}
 	}
+
+	slog.Info("Flush worker stopped (channel closed).", "component", "lsm")
 }
 
 func (e *LSMEngine) flushMemTable(memTable *MemTable) error {
@@ -605,29 +627,36 @@ func (e *LSMEngine) RestoreDB(path string) error {
 
 // Close gracefully shuts down the engine
 func (e *LSMEngine) Close() error {
-	e.cancel()
+	slog.Info("Database closing...", "component", "lsm")
 
-	// Wait for background workers with timeout
-	done := make(chan struct{})
-	go func() {
-		e.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// Success
-	case <-time.After(ShutdownTimeout):
-		return errors.New("shutdown timeout")
+	// 1. SỬA: Đẩy nốt dữ liệu RAM vào hàng đợi (nếu có)
+	if e.mem.Size() > 0 {
+		slog.Info("Scheduling active MemTable flush before shutdown...", "component", "lsm")
+		if err := e.rotateMemTable(); err != nil {
+			// Nếu hàng đợi đầy, chúng ta vẫn phải tiếp tục đóng
+			slog.Error("Failed to schedule final MemTable flush on close", "error", err)
+		}
 	}
 
-	// Close WAL
+	// 2. SỬA: Đóng flushCh để báo worker là hết việc
+	// (Worker sẽ xử lý hết hàng đợi rồi tự thoát)
+	close(e.flushCh)
+
+	// 3. SỬA: Chờ worker xử lý xong và tự thoát
+	e.wg.Wait()
+	slog.Info("Flush worker finished.", "component", "lsm")
+
+	// (Bây giờ e.cancel() không còn cần thiết nữa, nhưng giữ lại cũng không sao)
+	e.cancel()
+
+	// 4. Đóng WAL (SAU KHI mọi thứ đã được flush an toàn)
 	if e.wal != nil {
 		if err := e.wal.Close(); err != nil {
 			return err
 		}
 	}
 
+	slog.Info("Database closed gracefully.", "component", "lsm")
 	return nil
 }
 

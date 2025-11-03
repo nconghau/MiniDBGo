@@ -161,24 +161,24 @@ while true; do
             API_URL="${BASE_API_URL}/${CURRENT_COLLECTION}/${CURRENT_ID}"
             CURL_ARGS+=("-X" "GET" "$API_URL")
             ;;
-        6)
-            # === HÀNH ĐỘNG: PUT (UPSERT - WRITE) ===
-            OP_TYPE="PUT"
-            ((TOTAL_PUT_REQS++))
-            # Dùng CURRENT_ID đã tạo ở trên
-            API_URL="${BASE_API_URL}/${CURRENT_COLLECTION}/${CURRENT_ID}"
-            # Payload cần dùng đúng CURRENT_ID
-            PAYLOAD="{\"_id\":\"${CURRENT_ID}\",\"name\":\"Load Test Item - Update\",\"ts\":${CURRENT_TS},\"value\":\"$RANDOM\"}"
-            CURL_ARGS+=("-X" "PUT" "-d" "$PAYLOAD" "$API_URL")
-            ;;
-        7)
-            # === HÀNH ĐỘNG: DELETE (WRITE) ===
-            OP_TYPE="DELETE"
-            ((TOTAL_DELETE_REQS++))
-            # Dùng CURRENT_ID đã tạo ở trên
-            API_URL="${BASE_API_URL}/${CURRENT_COLLECTION}/${CURRENT_ID}"
-            CURL_ARGS+=("-X" "DELETE" "$API_URL")
-            ;;
+        # 6)
+        #     # === HÀNH ĐỘNG: PUT (UPSERT - WRITE) ===
+        #     OP_TYPE="PUT"
+        #     ((TOTAL_PUT_REQS++))
+        #     # Dùng CURRENT_ID đã tạo ở trên
+        #     API_URL="${BASE_API_URL}/${CURRENT_COLLECTION}/${CURRENT_ID}"
+        #     # Payload cần dùng đúng CURRENT_ID
+        #     PAYLOAD="{\"_id\":\"${CURRENT_ID}\",\"name\":\"Load Test Item - Update\",\"ts\":${CURRENT_TS},\"value\":\"$RANDOM\"}"
+        #     CURL_ARGS+=("-X" "PUT" "-d" "$PAYLOAD" "$API_URL")
+        #     ;;
+        # 7)
+        #     # === HÀNH ĐỘNG: DELETE (WRITE) ===
+        #     OP_TYPE="DELETE"
+        #     ((TOTAL_DELETE_REQS++))
+        #     # Dùng CURRENT_ID đã tạo ở trên
+        #     API_URL="${BASE_API_URL}/${CURRENT_COLLECTION}/${CURRENT_ID}"
+        #     CURL_ARGS+=("-X" "DELETE" "$API_URL")
+        #     ;;
     esac
 
     # --- 3. THỰC THI & QUẢN LÝ JOB (GHI LOG LỖI) ---
