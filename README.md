@@ -16,11 +16,14 @@ MiniDBGo is a lightweight, educational database engine written in Go. This proje
 * **LSM Storage Engine**: The core is a simple but effective LSM-Tree implementation.
 * **Database Operations**: Includes `dumpDB`, `restoreDB`, and `compact`.
 
-**MiniDBGo Client:**
-![MiniDBGo Client API Tool](./static/client_tool_v1.png)
+**MiniDBGo Client**
+![MiniDBGo Client](./static/client_tool_v1.png)
 
-**Dashboard:**
+**MiniDBGo Client Dashboard**
 ![MiniDBGo Client Dashboard](./static/dashboard_v2.png)
+
+**Docker Stats**
+![Docker Stats](./static/docker_v1.png)
 
 ## 💡 Core Architecture: How It Works (LSM-Tree)
 
