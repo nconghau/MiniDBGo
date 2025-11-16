@@ -14,8 +14,8 @@ services:
     environment:
       - MODE=server
       - GOMEMLIMIT=128MiB    # Crucial: Go runtime memory limit 
-      - MAX_MEM_MB=25        # Smaller memtable 
-      - FLUSH_SIZE=5000      # Flush more frequently 
+      - MAX_MEM_MB=2        # Smaller memtable 
+      - FLUSH_SIZE=10000      # Flush more frequently 
       - GOGC=30              # More aggressive garbage collection
     restart: unless-stopped
     deploy:
@@ -39,7 +39,7 @@ services:
       context: ./client/MiniDBGoClient
       dockerfile: Dockerfile
       args:
-        - PUBLIC_BASE_URL_ARG=http://localhost:6866/api
+        - PUBLIC_BASE_URL=http://localhost:6866/api
     container_name: minidbgo-client
     ports:
       - "3000:80"
@@ -56,3 +56,5 @@ services:
           cpus: "0.2"
           memory: 128M
 
+
+#docker compose up -d --build
