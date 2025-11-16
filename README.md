@@ -20,7 +20,7 @@ MiniDBGo is a lightweight, educational database engine written in Go. This proje
 ![MiniDBGo Client API Tool](./static/client_tool_v1.png)
 
 **Dashboard:**
-![MiniDBGo Client Dashboard](./static/dashboard_v1.png)
+![MiniDBGo Client Dashboard](./static/dashboard_v2.png)
 
 ## 💡 Core Architecture: How It Works (LSM-Tree)
 
