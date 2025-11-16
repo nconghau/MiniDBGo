@@ -7,6 +7,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 
 	"github.com/chzyer/readline"
 	// --- SỬA ĐỔI: Import cả hai ---
@@ -29,7 +30,7 @@ func main() {
 
 	// Set GOGC for better memory management
 	// Lower values = more frequent GC = less memory usage
-	debug.SetGCPercent(50) // Default is 100
+	debug.SetGCPercent(30) // Default is 100
 
 	// Limit goroutines
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -37,17 +38,20 @@ func main() {
 	slog.Info("Starting MiniDBGo", "pid", os.Getpid())
 
 	// Open database with production settings
-	flushSize := int64(10000)              // 10k records
-	maxMemBytes := int64(50 * 1024 * 1024) // 50MB
+	flushSize := int64(10000)             // 10000 =  10k records
+	maxMemBytes := int64(2 * 1024 * 1024) // 2 = 2MB
 
 	// Allow configuration via environment
 	if val := os.Getenv("FLUSH_SIZE"); val != "" {
-		fmt.Sscanf(val, "%d", &flushSize)
+		// Dùng strconv.ParseInt để an toàn hơn
+		if fs, err := strconv.ParseInt(val, 10, 64); err == nil {
+			flushSize = fs
+		}
 	}
 	if val := os.Getenv("MAX_MEM_MB"); val != "" {
-		var mb int64
-		fmt.Sscanf(val, "%d", &mb)
-		maxMemBytes = mb * 1024 * 1024
+		if mb, err := strconv.ParseInt(val, 10, 64); err == nil {
+			maxMemBytes = mb * 1024 * 1024
+		}
 	}
 
 	// --- SỬA ĐỔI: Gọi lsm.OpenLSMWithConfig và gán cho engine.Engine ---

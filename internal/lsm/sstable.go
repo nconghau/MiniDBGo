@@ -5,6 +5,7 @@ import (
 	"bytes" // --- MỚI ---
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
@@ -115,21 +116,32 @@ func (w *SSTWriter) flushCurrentBlock() error {
 		return nil
 	}
 
-	// Ghi khối dữ liệu ra writer
 	blockData := w.currentBlock.Bytes()
+
+	// --- LOGIC MỚI: TÍNH VÀ GHI CRC ---
+	crc := crc32.Checksum(blockData, crcTable)
+	// --- KẾT THÚC LOGIC MỚI ---
+
+	// Ghi khối dữ liệu (như cũ)
 	if _, err := w.writer.Write(blockData); err != nil {
 		return fmt.Errorf("write data block: %w", err)
 	}
 
-	// Thêm entry vào index
+	// --- LOGIC MỚI: GHI CRC (4 bytes) ---
+	if err := binary.Write(w.writer, binary.LittleEndian, crc); err != nil {
+		return fmt.Errorf("write data block crc: %w", err)
+	}
+	// --- KẾT THÚC LOGIC MỚI ---
+
 	w.indexEntries = append(w.indexEntries, blockIndexEntry{
 		lastKey: w.lastBlockKey,
 		offset:  w.currentBlockOffset,
-		length:  int64(len(blockData)),
+		length:  int64(len(blockData)), // Vẫn giữ nguyên length của data
 	})
 
 	// Cập nhật offset cho khối tiếp theo
-	w.currentBlockOffset += int64(len(blockData))
+	// (offset MỚI = offset cũ + data_len + 4 byte CRC)
+	w.currentBlockOffset += int64(len(blockData)) + 4 // +4 cho CRC
 	w.currentBlock.Reset()
 	return nil
 }
@@ -418,7 +430,6 @@ func readAndSearchIndexBlock(f *os.File, indexOffset, indexLen int64, key string
 }
 
 // ReadSSTFind searches for a key in an SSTable file
-// ReadSSTFind searches for a key in an SSTable file
 // --- SỬA ĐỔI: Sử dụng Index Block thay vì quét tuần tự ---
 func ReadSSTFind(path string, key string) ([]byte, bool, error) {
 	f, err := os.Open(path)
@@ -476,6 +487,24 @@ func ReadSSTFind(path string, key string) ([]byte, bool, error) {
 	if _, err := f.ReadAt(dataBlock, blockOffset); err != nil {
 		return nil, false, fmt.Errorf("read data block: %w", err)
 	}
+
+	// --- LOGIC MỚI: ĐỌC VÀ KIỂM TRA CRC ---
+	var storedCrc uint32
+	// Đọc 4 byte CRC ngay sau data block
+	crcBytes := make([]byte, 4)
+	if _, err := f.ReadAt(crcBytes, blockOffset+blockLen); err != nil {
+		return nil, false, fmt.Errorf("read data block crc: %w", err)
+	}
+
+	if err := binary.Read(bytes.NewReader(crcBytes), binary.LittleEndian, &storedCrc); err != nil {
+		return nil, false, fmt.Errorf("parse data block crc: %w", err)
+	}
+
+	calculatedCrc := crc32.Checksum(dataBlock, crcTable)
+	if storedCrc != calculatedCrc {
+		return nil, false, ErrCorruption // Lỗi! Block SSTable bị hỏng.
+	}
+	// --- KẾT THÚC LOGIC MỚI ---
 
 	// Sử dụng hàm đã sửa lỗi
 	return searchDataBlock(dataBlock, key)

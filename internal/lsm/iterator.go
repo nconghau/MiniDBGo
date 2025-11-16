@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 
@@ -15,9 +16,6 @@ import (
 // --- MỚI: Kiểm tra static ---
 var _ engine.Iterator = (*memTableIterator)(nil)
 var _ engine.Iterator = (*sstIterator)(nil)
-
-// --- SỬA ĐỔI: Xóa interface (đã ở engine.go) ---
-// [cite: 167-171]
 
 // --- memTableIterator ---
 type memTableIterator struct {
@@ -241,6 +239,26 @@ func (it *sstIterator) loadNextBlock() bool {
 		it.err = fmt.Errorf("read data block: %w", err)
 		return false
 	}
+
+	// --- LOGIC MỚI: ĐỌC VÀ KIỂM TRA CRC ---
+	var storedCrc uint32
+	crcBytes := make([]byte, 4)
+	if _, err := it.f.ReadAt(crcBytes, entry.offset+entry.length); err != nil {
+		it.err = fmt.Errorf("read data block crc: %w", err)
+		return false
+	}
+
+	if err := binary.Read(bytes.NewReader(crcBytes), binary.LittleEndian, &storedCrc); err != nil {
+		it.err = fmt.Errorf("parse data block crc: %w", err)
+		return false
+	}
+
+	calculatedCrc := crc32.Checksum(dataBlock, crcTable)
+	if storedCrc != calculatedCrc {
+		it.err = ErrCorruption // Lỗi! Block SSTable bị hỏng.
+		return false
+	}
+	// --- KẾT THÚC LOGIC MỚI ---
 
 	it.blockIter = newBlockIterator(dataBlock)
 	return true

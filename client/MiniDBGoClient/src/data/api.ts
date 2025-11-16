@@ -32,8 +32,8 @@ export async function fetchApi(
   method: string,
   path: string, // Đường dẫn CHƯA có /api/ (ví dụ: /_collections)
   body: string | null,
-  params: KeyValueItem[], // <-- MỚI
-  headers: KeyValueItem[], // <-- MỚI
+  params: KeyValueItem[], 
+  headers: KeyValueItem[], 
 ): Promise<ResponseData> {
   const startTime = performance.now()
 

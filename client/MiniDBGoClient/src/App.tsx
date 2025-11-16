@@ -47,7 +47,7 @@ export default function App() {
             <h1 className="text-xl font-bold text-gray-800">MiniDBGo Client</h1>
           </div>
           {/* --- CẬP NHẬT: Nút Compact DB dùng màu primary mới --- */}
-          {/* <button
+          <button
             id="btn-compact"
             onClick={handleCompact}
             disabled={loading}
@@ -55,7 +55,7 @@ export default function App() {
           >
             <Database className="w-4 h-4" />
             Compact DB
-          </button> */}
+          </button>
         </div>
       </header>
 

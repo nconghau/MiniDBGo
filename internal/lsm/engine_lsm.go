@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,6 +17,11 @@ import (
 
 	"github.com/nconghau/MiniDBGo/internal/engine"
 )
+
+// ErrCorruption là lỗi trả về khi phát hiện
+// dữ liệu trên đĩa bị hỏng (checksum không khớp).
+var ErrCorruption = errors.New("data corruption detected")
+var crcTable = crc32.MakeTable(crc32.Castagnoli)
 
 const (
 	// Memory limits
@@ -30,6 +36,8 @@ const (
 
 	// --- MỚI: Cấu hình Compaction ---
 	L0CompactionTrigger = 4 // Kích hoạt nén L0 -> L1 khi có 4 tệp L0
+	// Kích hoạt nén L1 -> L2 khi L1 vượt quá 100MB
+	L1CompactionTriggerBytes = 100 * 1024 * 1024
 )
 
 type LSMEngine struct {
@@ -142,6 +150,11 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.E
 			}
 		}
 		slog.Info("Cleaned up replayed WAL files.", "count", len(replayedFiles))
+
+		// --- BẮT ĐẦU MÃ MỚI ---
+		// SAU KHI FLUSH, ĐÁNH THỨC COMPACTION WORKER ĐỂ NÓ KIỂM TRA
+		engine.tryScheduleCompaction()
+		// --- KẾT THÚC MÃ MỚI ---
 	}
 	engine.wg.Add(2)
 	go engine.flushWorker()
@@ -309,43 +322,81 @@ func (e *LSMEngine) compactionWorker() {
 			break // Engine đang tắt
 		}
 
-		// Khóa compactMu đảm bảo chỉ 1 compaction chạy
-		e.compactMu.Lock()
-
-		slog.Info("Compaction triggered", "component", "lsm")
-		start := time.Now()
-
-		if err := e.runCompaction(); err != nil {
+		if err := e.pickAndRunCompaction(); err != nil {
 			slog.Error("Compaction error", "error", err)
-		} else {
-			slog.Info("Compaction finished", "duration_ms", time.Since(start).Milliseconds())
 		}
-
-		e.compactMu.Unlock()
-
-		// Kích hoạt kiểm tra lại, phòng khi L0
-		// lại đầy trong lúc đang nén
-		e.tryScheduleCompaction()
 	}
 
 	slog.Info("Compaction worker stopped.", "component", "lsm")
 }
 
-// tryScheduleCompaction kiểm tra xem có cần nén không
-// và gửi tín hiệu không-chặn (non-blocking)
+// --- BẮT ĐẦU MÃ MỚI ---
+// (Thêm hàm mới này vào file engine_lsm.go)
+
+// pickAndRunCompaction là bộ não mới: nó quyết định CÓ
+// cần nén không, và nén CẤP NÀO.
+func (e *LSMEngine) pickAndRunCompaction() error {
+	e.compactMu.Lock() // Khóa để đảm bảo chỉ 1 compaction chạy
+	defer e.compactMu.Unlock()
+
+	// Lấy snapshot của version hiện tại
+	e.mu.RLock()
+	l0Files := e.current.Levels[0]
+	l1Files := e.current.Levels[1]
+	// Chúng ta cần lấy l2Files ngay cả khi nó không tồn tại
+	// để dùng trong logic tìm file chồng lấn (overlap)
+	l2Files := e.current.Levels[2]
+	e.mu.RUnlock()
+
+	// --- Quyết định 1: Ưu tiên L0 ---
+	if len(l0Files) >= L0CompactionTrigger {
+		slog.Info("Starting L0->L1 compaction | pickAndRunCompaction", "files", len(l0Files))
+		// (Chúng ta sẽ đổi tên hàm runCompaction() thành runL0Compaction)
+		return e.runL0Compaction(l0Files)
+	}
+
+	// --- Quyết định 2: Kiểm tra L1 ---
+	var l1Size int64
+	for _, f := range l1Files {
+		l1Size += f.FileSize
+	}
+
+	if l1Size > L1CompactionTriggerBytes {
+		slog.Info("Starting L1->L2 compaction", "l1_size_mb", l1Size/1024/1024)
+		// (Đây là hàm mới chúng ta sắp viết)
+		return e.runL1Compaction(l1Files, l2Files)
+	}
+
+	slog.Debug("No compaction needed")
+	return nil
+}
+
+// --- KẾT THÚC MÃ MỚI ---
+
+// (Hàm này đã có, chỉ cần sửa logic kiểm tra L1)
 func (e *LSMEngine) tryScheduleCompaction() {
 	e.mu.RLock()
-	// --- SỬA ĐỔI: Kiểm tra cờ trước khi gửi ---
 	if e.shuttingDown {
 		e.mu.RUnlock()
-		return // Đang tắt, không kích hoạt nữa
+		return
 	}
 
 	// Chính sách: Nén L0 nếu có >= N tệp
-	needsCompaction := len(e.current.Levels[0]) >= L0CompactionTrigger
+	needsL0Compaction := len(e.current.Levels[0]) >= L0CompactionTrigger
+
+	// --- BẮT ĐẦU MÃ MỚI ---
+	// Chính sách: Nén L1 nếu kích thước > L1CompactionTriggerBytes
+	var l1Size int64
+	for _, f := range e.current.Levels[1] {
+		l1Size += f.FileSize
+	}
+	needsL1Compaction := l1Size > L1CompactionTriggerBytes
+	// --- KẾT THÚC MÃ MỚI ---
+
 	e.mu.RUnlock() // Mở khóa
 
-	if needsCompaction {
+	// Chỉ cần một trong hai điều kiện là đủ để "đánh thức" worker
+	if needsL0Compaction || needsL1Compaction {
 		select {
 		case e.compactionCh <- struct{}{}:
 			// Đã gửi tín hiệu
@@ -797,11 +848,58 @@ func (e *LSMEngine) Close() error {
 // --- KẾT THÚC SỬA ĐỔI ---
 
 func (e *LSMEngine) GetMetrics() map[string]int64 {
-	return map[string]int64{
+	// 1. Lấy các counters (bộ đếm) cũ (như hiện tại)
+	metricsMap := map[string]int64{
 		"puts":     e.metrics.puts.Load(),
 		"gets":     e.metrics.gets.Load(),
 		"deletes":  e.metrics.deletes.Load(),
 		"flushes":  e.metrics.flushes.Load(),
 		"compacts": e.metrics.compacts.Load(),
 	}
+
+	// --- BẮT ĐẦU MÃ MỚI ---
+	// 2. Lấy các gauges (trạng thái) về bộ nhớ
+	// (Cần khóa RLock để đọc an toàn)
+	e.mu.RLock()
+	metricsMap["memtable_entries"] = e.mem.Size()
+	metricsMap["memtable_bytes"] = e.mem.ByteSize()
+	e.mu.RUnlock()
+
+	e.immutMu.RLock()
+	metricsMap["immutable_count"] = int64(len(e.immutables))
+	e.immutMu.RUnlock()
+
+	// 3. Lấy các gauges về đĩa (trạng thái các Cấp)
+	// (Đây là phần quan trọng nhất)
+	e.mu.RLock()
+	// Sao chép map Levels để tránh giữ khóa lâu
+	levelsSnapshot := make(map[int][]*FileMetadata)
+	for level, files := range e.current.Levels {
+		levelsSnapshot[level] = files // Chỉ sao chép slice header
+	}
+	e.mu.RUnlock()
+
+	// Khởi tạo tất cả các cấp (L0, L1, L2) để chúng luôn xuất hiện
+	metricsMap["level_0_files"] = 0
+	metricsMap["level_0_bytes"] = 0
+	metricsMap["level_1_files"] = 0
+	metricsMap["level_1_bytes"] = 0
+	metricsMap["level_2_files"] = 0
+	metricsMap["level_2_bytes"] = 0
+
+	for level, files := range levelsSnapshot {
+		keyFiles := fmt.Sprintf("level_%d_files", level)
+		keyBytes := fmt.Sprintf("level_%d_bytes", level)
+
+		metricsMap[keyFiles] = int64(len(files))
+
+		var totalBytes int64
+		for _, f := range files {
+			totalBytes += f.FileSize
+		}
+		metricsMap[keyBytes] = totalBytes
+	}
+	// --- KẾT THÚC MÃ MỚI ---
+
+	return metricsMap
 }

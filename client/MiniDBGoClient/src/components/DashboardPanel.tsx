@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { fetchApi } from '../data/api'
+import { fetchApi, formatBytes } from '../data/api'
 import { Line } from 'react-chartjs-2'
 import {
   Chart,
@@ -18,11 +18,12 @@ import {
   Cpu,
   MemoryStick,
   Zap,
-  Database, // MỚI
-  Package, // MỚI
-  Trash2, // MỚI
-  Recycle, // MỚI
+  Database, 
+  Recycle,
+  Layers,
+  FileStack, 
 } from 'lucide-react'
+import { LsmTreeMetrics } from './MetricUI'
 
 Chart.register(
   CategoryScale,
@@ -59,15 +60,26 @@ interface StatsData {
 }
 
 // === MỚI: Interface cho /api/metrics ===
-interface EngineMetrics {
+export interface EngineMetrics {
   puts: number
   gets: number
   deletes: number
   flushes: number
   compacts: number
+  // --- THÊM CÁC METRICS MỚI ---
+  memtable_entries: number
+  memtable_bytes: number
+  immutable_count: number
+  level_0_files: number
+  level_0_bytes: number
+  level_1_files: number
+  level_1_bytes: number
+  level_2_files: number
+  level_2_bytes: number
 }
 
 const MAX_DATA_POINTS = 30
+const MAX_IMMUTABLE_TABLES = 3 // Giả sử là 3
 
 export default function DashboardPanel() {
   const [stats, setStats] = useState<StatsData | null>(null)
@@ -285,37 +297,42 @@ export default function DashboardPanel() {
           loading={loading}
         />
 
-        {/* Hàng 2: Chỉ số DB (MỚI) */}
+       {/* Hàng 2: Chỉ số DB (CẬP NHẬT) */}
         <StatCard
-          icon={Database} // MỚI
-          label="Total Puts"
+          icon={Database}
+          label="MemTable Size" // <-- THAY ĐỔI
           value={
-            metrics ? intFormatter.format(metrics.puts) : '...'
+            metrics ? formatBytes(metrics.memtable_bytes) : '...' // <-- THAY ĐỔI
           }
           loading={loading}
         />
         <StatCard
-          icon={Package} // MỚI
-          label="Total Gets"
+          icon={Layers} // <-- THAY ĐỔI (Icon mới)
+          label="Immutable Count" // <-- THAY ĐỔI
           value={
-            metrics ? intFormatter.format(metrics.gets) : '...'
+            metrics ? `${metrics.immutable_count} / ${MAX_IMMUTABLE_TABLES}` : '...' // <-- THAY ĐỔI
           }
           loading={loading}
         />
         <StatCard
-          icon={MemoryStick} // MỚI (dùng lại icon)
-          label="Go Heap (InUse)"
+          icon={FileStack} // <-- THAY ĐỔI (Icon mới)
+          label="L0 Files" // <-- THAY ĐỔI
           value={
-            stats ? `${floatFormatter.format(stats.go_heap_inuse_mb)} MB` : '...'
+            metrics ? intFormatter.format(metrics.level_0_files) : '...' // <-- THAY ĐỔI
           }
           loading={loading}
         />
         <StatCard
-          icon={Recycle} // MỚI
-          label="Total GC Cycles"
-          value={stats ? intFormatter.format(stats.go_num_gc) : '...'}
+          icon={Recycle}
+          label="Total Compactions" // <-- THAY ĐỔI
+          value={metrics ? intFormatter.format(metrics.compacts) : '...'} // <-- THAY ĐỔI
           loading={loading}
         />
+      </div>
+
+      {/* === THÊM MỚI: Khu vực LSM Tree State === */}
+      <div className="mb-6">
+        <LsmTreeMetrics metrics={metrics} />
       </div>
 
       {/* Phần biểu đồ (Cập nhật biểu đồ RAM) */}
