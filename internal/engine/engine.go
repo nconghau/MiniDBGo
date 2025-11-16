@@ -1,14 +1,36 @@
 package engine
 
-import "github.com/nconghau/MiniDBGo/internal/lsm"
+// (Không import lsm)
+
+// --- MỚI: Di chuyển Item (từ memtable.go) sang đây ---
+type Item struct {
+	Value     []byte
+	Tombstone bool
+}
+
+// --- MỚI: Định nghĩa Iterator interface (từ iterator.go) ---
+type Iterator interface {
+	Next() bool
+	Key() string
+	Value() *Item // Sử dụng engine.Item
+	Close() error
+	Error() error
+}
+
+// --- MỚI: Định nghĩa Batch interface ---
+type Batch interface {
+	Put(key, value []byte)
+	Delete(key []byte)
+	Size() int
+}
 
 // DB Engine interface
+// --- SỬA ĐỔI: Sử dụng các interface cục bộ ---
 type Engine interface {
 	Put(key, value []byte) error
 	Update(key, value []byte) error
 	Delete(key []byte) error
 	Get(key []byte) ([]byte, error)
-	// IterKeys() ([]string, error) // Chúng ta sẽ thay thế hàm này
 	DumpDB(path string) error
 	RestoreDB(path string) error
 	Compact() error
@@ -16,13 +38,12 @@ type Engine interface {
 	GetMetrics() map[string]int64
 	IterKeysWithLimit(limit int) ([]string, error)
 
-	// --- MỚI: Thêm Batch và Iterator ---
-	NewBatch() *lsm.Batch
-	ApplyBatch(b *lsm.Batch) error
-	NewIterator() (lsm.Iterator, error) // Thêm hàm tạo iterator
+	NewBatch() Batch                // Trả về interface
+	ApplyBatch(b Batch) error       // Chấp nhận interface
+	NewIterator() (Iterator, error) // Trả về interface
 }
 
-// Open create LSMEngine default backend
-func Open(path string) (Engine, error) {
-	return lsm.OpenLSM(path)
-}
+// --- SỬA ĐỔI: Xóa hàm Open() ---
+// (Hàm Open() không thể ở đây vì nó tạo ra
+// phụ thuộc vào lsm. Chúng ta sẽ gọi lsm.OpenLSM trực tiếp
+// từ main.go)

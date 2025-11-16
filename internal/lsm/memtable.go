@@ -5,20 +5,19 @@ import (
 	"sync/atomic"
 
 	"github.com/huandu/skiplist"
+	// --- MỚI: Import engine ---
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
-// Item wraps a value + tombstone flag
-type Item struct {
-	Value     []byte
-	Tombstone bool
-}
+// --- SỬA ĐỔI: Xóa định nghĩa Item (đã ở engine.go) ---
 
 type MemTable struct {
 	sl       *skiplist.SkipList
-	byteSize int64 // atomic counter for memory usage
+	byteSize int64
 	mu       sync.RWMutex
 }
 
+// (NewMemTable giữ nguyên)
 func NewMemTable() *MemTable {
 	return &MemTable{
 		sl:       skiplist.New(skiplist.String),
@@ -30,49 +29,42 @@ func (m *MemTable) Put(key string, value []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if key already exists to adjust byte size correctly
-	if existing, ok := m.sl.GetValue(key); ok {
-		if existingItem, ok := existing.(*Item); ok {
-			// Subtract old value size
+	if existing, ok := m.sl.GetValue(key); ok { // [cite: 80-81]
+		if existingItem, ok := existing.(*engine.Item); ok { // --- SỬA ĐỔI: Dùng engine.Item ---
 			atomic.AddInt64(&m.byteSize, -int64(len(existingItem.Value)))
 		}
 	}
 
-	item := &Item{Value: value, Tombstone: false}
+	item := &engine.Item{Value: value, Tombstone: false} // --- SỬA ĐỔI: Dùng engine.Item ---
 	m.sl.Set(key, item)
-
-	// Add new size (key + value + overhead)
-	atomic.AddInt64(&m.byteSize, int64(len(key)+len(value)+16)) // 16 bytes overhead
+	atomic.AddInt64(&m.byteSize, int64(len(key)+len(value)+16))
 }
 
 func (m *MemTable) Delete(key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Check if key exists
-	if existing, ok := m.sl.GetValue(key); ok {
-		if existingItem, ok := existing.(*Item); ok {
-			// Subtract old value size
+	if existing, ok := m.sl.GetValue(key); ok { // [cite: 81-82]
+		if existingItem, ok := existing.(*engine.Item); ok { // --- SỬA ĐỔI: Dùng engine.Item ---
 			atomic.AddInt64(&m.byteSize, -int64(len(existingItem.Value)))
 		}
 	}
 
-	item := &Item{Tombstone: true}
+	item := &engine.Item{Tombstone: true} // --- SỬA ĐỔI: Dùng engine.Item ---
 	m.sl.Set(key, item)
-
-	// Add tombstone overhead
 	atomic.AddInt64(&m.byteSize, int64(len(key)+8))
 }
 
-func (m *MemTable) Get(key string) (*Item, bool) {
+// --- SỬA ĐỔI: Trả về engine.Item ---
+func (m *MemTable) Get(key string) (*engine.Item, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	val, ok := m.sl.GetValue(key)
-	if !ok || val == nil {
+	if !ok || val == nil { // [cite: 82-83]
 		return nil, false
 	}
-	return val.(*Item), true
+	return val.(*engine.Item), true
 }
 
 func (m *MemTable) Keys() []string {
@@ -95,30 +87,26 @@ func (m *MemTable) ByteSize() int64 {
 	return atomic.LoadInt64(&m.byteSize)
 }
 
-// SnapshotAndReset copies current state and resets table
-// This is now memory-safe and doesn't hold locks for long
-func (m *MemTable) SnapshotAndReset() map[string]*Item {
+// --- SỬA ĐỔI: Trả về map[string]*engine.Item ---
+func (m *MemTable) SnapshotAndReset() map[string]*engine.Item {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	items := make(map[string]*Item, m.sl.Len())
+	items := make(map[string]*engine.Item, m.sl.Len())
 
-	for el := m.sl.Front(); el != nil; el = el.Next() {
+	for el := m.sl.Front(); el != nil; el = el.Next() { // [cite: 84-85]
 		k := el.Key().(string)
-		v := el.Value.(*Item)
+		v := el.Value.(*engine.Item) // --- SỬA ĐỔI ---
 
-		// Deep copy to prevent data races
-		itemCopy := &Item{
+		itemCopy := &engine.Item{ // --- SỬA ĐỔI: Dùng engine.Item ---
 			Value:     append([]byte(nil), v.Value...),
 			Tombstone: v.Tombstone,
 		}
 		items[k] = itemCopy
 	}
 
-	// Reset without creating new skiplist (reuse memory)
 	m.sl = skiplist.New(skiplist.String)
 	atomic.StoreInt64(&m.byteSize, 0)
-
 	return items
 }
 
@@ -131,40 +119,36 @@ func (m *MemTable) Clear() {
 	atomic.StoreInt64(&m.byteSize, 0)
 }
 
-// Iterate provides safe iteration over all entries
-func (m *MemTable) Iterate(fn func(key string, item *Item) error) error {
+// --- SỬA ĐỔI: Dùng engine.Item ---
+func (m *MemTable) Iterate(fn func(key string, item *engine.Item) error) error {
+	// ... (logic [cite: 85-87] giữ nguyên, chỉ thay kiểu *Item) ...
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	for el := m.sl.Front(); el != nil; el = el.Next() {
 		k := el.Key().(string)
-		v := el.Value.(*Item)
-
+		v := el.Value.(*engine.Item)
 		if err := fn(k, v); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 
-// Stats returns memtable statistics
+// --- SỬA ĐỔI: Dùng engine.Item ---
 func (m *MemTable) Stats() map[string]interface{} {
+	// ... (logic [cite: 87-88] giữ nguyên, chỉ thay kiểu *Item) ...
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
 	tombstoneCount := 0
 	valueCount := 0
-
 	for el := m.sl.Front(); el != nil; el = el.Next() {
-		v := el.Value.(*Item)
+		v := el.Value.(*engine.Item)
 		if v.Tombstone {
 			tombstoneCount++
 		} else {
 			valueCount++
 		}
 	}
-
 	return map[string]interface{}{
 		"total_entries":   m.sl.Len(),
 		"value_entries":   valueCount,

@@ -24,11 +24,12 @@ func mainMigrate() {
 		log.Fatalf("open old db failed: %v", err)
 	}
 
-	// open LSM engine
-	eng, err := lsm.OpenLSM(lsmDir)
+	// --- SỬA ĐỔI: Gọi lsm.OpenLSM ---
+	eng, err := lsm.OpenLSM(lsmDir) // (Trả về engine.Engine)
 	if err != nil {
-		log.Fatalf("open lsm failed: %v", err)
+		log.Fatalf("open lsm failed: %w", err)
 	}
+	// --- KẾT THÚC SỬA ĐỔI ---
 
 	count := 0
 	_ = dbf.IterateEntries(func(offset int64, key, value []byte) error {

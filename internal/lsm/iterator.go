@@ -8,39 +8,30 @@ import (
 	"os"
 
 	"github.com/huandu/skiplist"
+	// --- MỚI: Import engine ---
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
-// Iterator là một interface (hợp đồng) chung cho tất cả các trình lặp
-type Iterator interface {
-	// Next di chuyển con trỏ đến mục tiếp theo.
-	// Trả về false nếu hết dữ liệu hoặc có lỗi.
-	Next() bool
-	// Key trả về key của mục hiện tại (sau khi gọi Next()).
-	Key() string
-	// Value trả về Item (value + tombstone) của mục hiện tại.
-	Value() *Item
-	// Close giải phóng tài nguyên.
-	Close() error
-	// Error trả về lỗi (nếu có) đã xảy ra.
-	Error() error
-}
+// --- MỚI: Kiểm tra static ---
+var _ engine.Iterator = (*memTableIterator)(nil)
+var _ engine.Iterator = (*sstIterator)(nil)
+
+// --- SỬA ĐỔI: Xóa interface (đã ở engine.go) ---
+// [cite: 167-171]
 
 // --- memTableIterator ---
-// Lặp qua skiplist trong bộ nhớ (đã được RLock)
-
 type memTableIterator struct {
-	node  *skiplist.Element // Con trỏ đến mục *hiện tại*
-	mem   *MemTable         // Giữ tham chiếu để RUnlock
+	node  *skiplist.Element
+	mem   *MemTable
 	key   string
-	value *Item
+	value *engine.Item // --- SỬA ĐỔI: Dùng engine.Item ---
 }
 
-// NewMemTableIterator tạo một iterator cho MemTable
-// Nắm giữ RLock của MemTable cho đến khi Close()
-func NewMemTableIterator(mem *MemTable) Iterator {
+// --- SỬA ĐỔI: Trả về engine.Iterator ---
+func NewMemTableIterator(mem *MemTable) engine.Iterator {
 	mem.mu.RLock()
 	return &memTableIterator{
-		node: mem.sl.Front(), // Bắt đầu tại mục đầu tiên
+		node: mem.sl.Front(),
 		mem:  mem,
 	}
 }
@@ -49,22 +40,16 @@ func (it *memTableIterator) Next() bool {
 	if it.node == nil {
 		return false
 	}
-
-	// Lấy giá trị hiện tại
 	it.key = it.node.Key().(string)
-	it.value = it.node.Value.(*Item)
-
-	// Di chuyển con trỏ
-	it.node = it.node.Next()
-
+	it.value = it.node.Value.(*engine.Item) // --- SỬA ĐỔI ---
+	it.node = it.node.Next()                // [cite: 171-172]
 	return true
 }
 
-func (it *memTableIterator) Key() string {
-	return it.key
-}
+func (it *memTableIterator) Key() string { return it.key }
 
-func (it *memTableIterator) Value() *Item {
+// --- SỬA ĐỔI: Dùng engine.Item ---
+func (it *memTableIterator) Value() *engine.Item {
 	return it.value
 }
 
@@ -86,7 +71,7 @@ func (it *memTableIterator) Error() error {
 type blockIterator struct {
 	r     *bytes.Reader
 	key   string
-	value *Item
+	value *engine.Item
 	err   error
 }
 
@@ -137,17 +122,17 @@ func (it *blockIterator) Next() bool {
 	}
 
 	it.key = string(kb)
-	it.value = &Item{
+	it.value = &engine.Item{
 		Value:     vb,
 		Tombstone: flag == 1,
 	}
 	return true
 }
 
-func (it *blockIterator) Key() string  { return it.key }
-func (it *blockIterator) Value() *Item { return it.value }
-func (it *blockIterator) Error() error { return it.err }
-func (it *blockIterator) Close() error { return nil } // Không làm gì
+func (it *blockIterator) Key() string         { return it.key }
+func (it *blockIterator) Value() *engine.Item { return it.value }
+func (it *blockIterator) Error() error        { return it.err }
+func (it *blockIterator) Close() error        { return nil } // Không làm gì
 
 // --- sstIterator ---
 // Lặp qua tất cả các khối (block) trong một tệp SSTable
@@ -160,13 +145,13 @@ type sstIterator struct {
 	blockIter *blockIterator // Iterator cho khối hiện tại
 
 	key   string
-	value *Item
+	value *engine.Item
 	err   error
 }
 
 // NewSSTableIterator tạo một iterator cho một tệp SSTable
 // Sử dụng logic từ Giai đoạn 1 (Block Index) để tải index
-func NewSSTableIterator(path string) (Iterator, error) {
+func NewSSTableIterator(path string) (engine.Iterator, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -292,7 +277,7 @@ func (it *sstIterator) Key() string {
 	return it.key
 }
 
-func (it *sstIterator) Value() *Item {
+func (it *sstIterator) Value() *engine.Item {
 	return it.value
 }
 

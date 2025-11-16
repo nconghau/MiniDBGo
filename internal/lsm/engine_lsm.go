@@ -9,11 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
 const (
@@ -26,13 +27,16 @@ const (
 	FlushTimeout    = 30 * time.Second
 	CompactTimeout  = 5 * time.Minute
 	ShutdownTimeout = 10 * time.Second
+
+	// --- MỚI: Cấu hình Compaction ---
+	L0CompactionTrigger = 4 // Kích hoạt nén L0 -> L1 khi có 4 tệp L0
 )
 
 type LSMEngine struct {
 	dir      string
 	wal      *WAL
-	mem      *MemTable
-	memBytes int64 // atomic counter for current memtable size
+	mem      *MemTable //
+	memBytes int64
 
 	immutMu    sync.RWMutex
 	immutables []*MemTable
@@ -42,7 +46,8 @@ type LSMEngine struct {
 	flushSize   int64
 	maxMemBytes int64
 
-	mu sync.RWMutex
+	mu           sync.RWMutex // Bảo vệ 'current', 'seq', 'wal', 'mem'
+	shuttingDown bool
 
 	// Lifecycle management
 	ctx    context.Context
@@ -51,7 +56,7 @@ type LSMEngine struct {
 
 	// Flush management
 	flushCh  chan *MemTable
-	flushErr atomic.Value // stores last flush error
+	flushErr atomic.Value
 
 	// Metrics
 	metrics struct {
@@ -61,92 +66,86 @@ type LSMEngine struct {
 		flushes  atomic.Int64
 		compacts atomic.Int64
 	}
+
+	// --- MỚI: Quản lý Version và Compaction ---
+	manifestPath string
+	current      *Version
+	compactionCh chan struct{} // Channel để kích hoạt nén
+	compactMu    sync.Mutex    // Đảm bảo chỉ 1 compaction chạy
 }
 
-func OpenLSM(dir string) (*LSMEngine, error) {
+// --- MỚI: KIỂM TRA STATIC ---
+// Dòng này sẽ biên dịch thành công
+var _ engine.Engine = (*LSMEngine)(nil)
+
+// --- SỬA ĐỔI: Kiểu trả về là engine.Engine ---
+func OpenLSM(dir string) (engine.Engine, error) {
 	return OpenLSMWithConfig(dir, DefaultFlushSize, DefaultMemTableBytes)
 }
 
-func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (*LSMEngine, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil { // [cite: 140]
+// --- SỬA ĐỔI: Kiểu trả về là engine.Engine ---
+func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.Engine, error) {
+	// ... (logic [cite: 187-193] gốc giữ nguyên) ...
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create dir: %w", err)
 	}
-
 	walDir := filepath.Join(dir, "wal")
 	sstDir := filepath.Join(dir, "sst")
-	if err := os.MkdirAll(walDir, 0o755); err != nil { // [cite: 141]
+	if err := os.MkdirAll(walDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create wal dir: %w", err)
 	}
-	if err := os.MkdirAll(sstDir, 0o755); err != nil { // [cite: 142]
+	if err := os.MkdirAll(sstDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create sst dir: %w", err)
 	}
-
-	// Find next WAL sequence
+	manifestPath := filepath.Join(dir, manifestFileName)
+	currentVersion, err := loadManifest(dir)
+	if err != nil {
+		return nil, fmt.Errorf("load manifest: %w", err)
+	}
 	seq := 1
-	files, _ := os.ReadDir(walDir)
-	for _, f := range files {
-		name := f.Name()
-		if strings.HasPrefix(name, "wal-") && strings.HasSuffix(name, ".log") {
-			num, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(name, "wal-"), ".log"))
-			if num >= seq {
-				seq = num + 1
+	for _, files := range currentVersion.Levels {
+		for _, f := range files {
+			var l, s int
+			fmt.Sscanf(filepath.Base(f.Path), "sst-L%d-%d.sst", &l, &s)
+			if s >= seq {
+				seq = s + 1
 			}
 		}
 	}
-
 	w, err := OpenWAL(walDir, seq)
 	if err != nil {
 		return nil, fmt.Errorf("open wal: %w", err)
 	}
-
 	ctx, cancel := context.WithCancel(context.Background())
-
 	engine := &LSMEngine{
-		dir:         dir,
-		wal:         w,
-		mem:         NewMemTable(),
-		immutables:  make([]*MemTable, 0, MaxImmutableTables),
-		sstDir:      sstDir, // [cite: 143]
-		seq:         1,
-		flushSize:   flushSize,
-		maxMemBytes: maxMemBytes,
-		ctx:         ctx,
-		cancel:      cancel,
-		flushCh:     make(chan *MemTable, MaxImmutableTables),
+		dir: dir, wal: w, mem: NewMemTable(), immutables: make([]*MemTable, 0, MaxImmutableTables),
+		sstDir: sstDir, seq: seq, flushSize: flushSize, maxMemBytes: maxMemBytes, ctx: ctx, cancel: cancel,
+		flushCh: make(chan *MemTable, MaxImmutableTables), manifestPath: manifestPath, current: currentVersion,
+		compactionCh: make(chan struct{}, 1),
 	}
-
-	// Replay WAL files
 	replayedFiles, err := engine.replayWAL(walDir)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("replay wal: %w", err)
 	}
-
-	// --- SỬA: Thêm logic flush dữ liệu replay và xóa WAL cũ ---
 	if engine.mem.Size() > 0 {
 		slog.Info("Flushing replayed WAL data to SSTable...", "count", engine.mem.Size())
-
-		// Đẩy dữ liệu replay vào hàng đợi flush
-		if err := engine.rotateMemTable(); err != nil { // [cite: 144]
-			cancel() // Hủy context nếu không thể flush
-			return nil, fmt.Errorf("failed to schedule flush for replayed data: %w", err)
+		if err := engine.flushMemTable(engine.mem); err != nil {
+			cancel()
+			return nil, fmt.Errorf("failed to flush replayed data: %w", err)
 		}
-
-		// Xóa các file WAL đã replay *sau khi* đẩy vào queue
-		// [cite: 145-148]
+		engine.mem = NewMemTable()
+		atomic.StoreInt64(&engine.memBytes, 0)
 		for _, p := range replayedFiles {
-			if err := os.Remove(p); err != nil { //
+			if err := os.Remove(p); err != nil {
 				slog.Warn("Failed to delete replayed WAL file", "path", p, "error", err)
 			}
 		}
 		slog.Info("Cleaned up replayed WAL files.", "count", len(replayedFiles))
 	}
-	// --- KẾT THÚC SỬA ---
-
-	// Start background flush worker
-	engine.wg.Add(1)
+	engine.wg.Add(2)
 	go engine.flushWorker()
-
+	go engine.compactionWorker()
 	return engine, nil
 }
 
@@ -189,13 +188,17 @@ func (e *LSMEngine) replayWAL(walDir string) ([]string, error) {
 	return names, nil
 }
 
+// flushWorker
+// --- SỬA ĐỔI: Chỉ gọi flushMemTable ---
 func (e *LSMEngine) flushWorker() {
 	defer e.wg.Done()
 	slog.Info("Flush worker started", "component", "lsm")
+
 	for memTable := range e.flushCh {
 		slog.Info("Starting memtable flush", "component", "lsm")
 		start := time.Now()
-		if err := e.flushMemTable(memTable); err != nil { // [cite: 150]
+
+		if err := e.flushMemTable(memTable); err != nil { //
 			e.flushErr.Store(err)
 			slog.Error("Memtable flush error",
 				"component", "lsm",
@@ -208,34 +211,161 @@ func (e *LSMEngine) flushWorker() {
 				"duration_ms", time.Since(start).Milliseconds(),
 			)
 		}
+
+		// --- MỚI: Kích hoạt kiểm tra compaction ---
+		e.tryScheduleCompaction()
 	}
 	slog.Info("Flush worker stopped (channel closed).", "component", "lsm")
 }
 
+// flushMemTable
+// --- SỬA ĐỔI: Cập nhật Manifest thay vì chỉ xóa immutable ---
 func (e *LSMEngine) flushMemTable(memTable *MemTable) error {
 	ctx, cancel := context.WithTimeout(e.ctx, FlushTimeout)
 	defer cancel()
+
 	items := memTable.SnapshotAndReset()
 	if len(items) == 0 {
-		e.removeImmutable(memTable)
+		e.removeImmutable(memTable) // Vẫn xóa khỏi danh sách immutable
 		return nil
 	}
+
+	// ... (kiểm tra context) ...
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	default:
 	}
-	seq := e.seq
+
+	// 1. Lấy seq và tăng (cần khóa mu)
 	e.mu.Lock()
+	seq := e.seq
 	e.seq++
 	e.mu.Unlock()
-	if _, err := WriteSST(e.sstDir, 0, seq, items); err != nil { // [cite: 151]
-		return fmt.Errorf("write sst: %w", err)
+
+	// 2. Viết SSTable (Level 0)
+	path := filepath.Join(e.sstDir, fmt.Sprintf("sst-L0-%06d.sst", seq))
+	writer, err := NewSSTWriter(path, uint32(len(items)))
+	if err != nil {
+		return err
 	}
+
+	keys := make([]string, 0, len(items))
+	for k := range items {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		if err := writer.WriteEntry(key, items[key]); err != nil {
+			writer.Close()
+			os.Remove(path)
+			return err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		os.Remove(path)
+		return err
+	}
+
+	// 3. Cập nhật Manifest (cần khóa mu)
+	meta := writer.GetMetadata()
+	fileMeta := &FileMetadata{
+		Level:    0,
+		Path:     path,
+		MinKey:   meta.MinKey,
+		MaxKey:   meta.MaxKey,
+		FileSize: meta.FileSize,
+		KeyCount: meta.KeyCount,
+	}
+
+	e.mu.Lock()
+	e.current.AddFile(fileMeta)
+	err = e.saveManifest() // Ghi đè MANIFEST
+	e.mu.Unlock()
+
+	if err != nil {
+		// Lỗi nghiêm trọng: SST đã được viết nhưng MANIFEST lỗi
+		slog.Error("CRITICAL: Failed to save manifest after flush", "error", err)
+		// (Trong CSDL thực, chúng ta sẽ thử lại)
+		return err
+	}
+
+	// 4. Dọn dẹp
 	e.removeImmutable(memTable)
 	e.metrics.flushes.Add(1)
 	return nil
 }
+
+// --- MỚI: Các hàm Compaction ---
+
+// compactionWorker là goroutine chạy nền
+func (e *LSMEngine) compactionWorker() {
+	defer e.wg.Done()
+	slog.Info("Compaction worker started", "component", "lsm")
+
+	for range e.compactionCh {
+		if e.ctx.Err() != nil {
+			break // Engine đang tắt
+		}
+
+		// Khóa compactMu đảm bảo chỉ 1 compaction chạy
+		e.compactMu.Lock()
+
+		slog.Info("Compaction triggered", "component", "lsm")
+		start := time.Now()
+
+		if err := e.runCompaction(); err != nil {
+			slog.Error("Compaction error", "error", err)
+		} else {
+			slog.Info("Compaction finished", "duration_ms", time.Since(start).Milliseconds())
+		}
+
+		e.compactMu.Unlock()
+
+		// Kích hoạt kiểm tra lại, phòng khi L0
+		// lại đầy trong lúc đang nén
+		e.tryScheduleCompaction()
+	}
+
+	slog.Info("Compaction worker stopped.", "component", "lsm")
+}
+
+// tryScheduleCompaction kiểm tra xem có cần nén không
+// và gửi tín hiệu không-chặn (non-blocking)
+func (e *LSMEngine) tryScheduleCompaction() {
+	e.mu.RLock()
+	// --- SỬA ĐỔI: Kiểm tra cờ trước khi gửi ---
+	if e.shuttingDown {
+		e.mu.RUnlock()
+		return // Đang tắt, không kích hoạt nữa
+	}
+
+	// Chính sách: Nén L0 nếu có >= N tệp
+	needsCompaction := len(e.current.Levels[0]) >= L0CompactionTrigger
+	e.mu.RUnlock() // Mở khóa
+
+	if needsCompaction {
+		select {
+		case e.compactionCh <- struct{}{}:
+			// Đã gửi tín hiệu
+		default:
+			// Worker đã bận, không cần gửi nữa
+		}
+	}
+}
+
+// --- KẾT THÚC MÃ MỚI ---
+
+// Compact (API công khai) chỉ kích hoạt
+// một lần kiểm tra nén nền (non-blocking).
+// Đây là hàm triển khai engine.Engine.
+func (e *LSMEngine) Compact() error {
+	e.tryScheduleCompaction()
+	return nil
+}
+
+// --- KẾT THÚC SỬA LỖI ---
 
 func (e *LSMEngine) removeImmutable(memTable *MemTable) {
 	e.immutMu.Lock()
@@ -248,42 +378,35 @@ func (e *LSMEngine) removeImmutable(memTable *MemTable) {
 	}
 }
 
-// --- KẾT THÚC BỎ QUA ---
-
-// --- BẮT ĐẦU MÃ MỚI ---
-
-// NewBatch tạo một đối tượng Batch mới để gom nhóm các thao tác
-func (e *LSMEngine) NewBatch() *Batch {
-	return NewBatch()
+// --- SỬA ĐỔI: Triển khai engine.Engine ---
+func (e *LSMEngine) NewBatch() engine.Batch {
+	return NewBatch() // (Hàm NewBatch() trong lsm/batch.go)
 }
 
-// ApplyBatch áp dụng tất cả các thao tác trong batch một cách nguyên tử
-func (e *LSMEngine) ApplyBatch(b *Batch) error {
-	e.mu.Lock() // Khóa toàn bộ engine để đảm bảo tính nguyên tử
-	defer e.mu.Unlock()
+func (e *LSMEngine) ApplyBatch(b engine.Batch) error {
+	lsmBatch, ok := b.(*lsmBatch) // Ép kiểu
+	if !ok {
+		return errors.New("invalid batch type provided")
+	}
 
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.ctx.Err() != nil {
 		return errors.New("engine is shutting down")
+	} // [cite: 196-197]
+	if lsmBatch.Size() == 0 {
+		return nil
 	}
 
-	if b.Size() == 0 {
-		return nil // Không có gì để làm
-	}
-
-	// 1. Ghi tất cả các mục vào WAL
-	// (Việc wal.Append() tự Flush() [cite: 126] đảm bảo độ bền
-	// trước khi chúng ta cập nhật memtable)
-	for _, entry := range b.entries {
-		if err := e.wal.Append(entry.Key, entry.Value, entry.Tombstone); err != nil {
+	for _, entry := range lsmBatch.entries {
+		if err := e.wal.Append(entry.Key, entry.Value, entry.Tombstone); err != nil { // [cite: 197-198]
 			return fmt.Errorf("wal append batch: %w", err)
 		}
 	}
 
-	// 2. Áp dụng tất cả các mục vào MemTable
 	needsFlush := false
-	for _, entry := range b.entries {
+	for _, entry := range lsmBatch.entries {
 		k := string(entry.Key)
-
 		if entry.Tombstone {
 			e.mem.Delete(k)
 			atomic.AddInt64(&e.memBytes, int64(len(k)))
@@ -291,28 +414,18 @@ func (e *LSMEngine) ApplyBatch(b *Batch) error {
 			e.mem.Put(k, entry.Value)
 			atomic.AddInt64(&e.memBytes, int64(len(k)+len(entry.Value)))
 		}
-
-		// Kiểm tra điều kiện flush (nhưng chỉ đặt cờ, không flush vội)
-		if e.mem.Size() >= e.flushSize || atomic.LoadInt64(&e.memBytes) >= e.maxMemBytes {
+		if e.mem.Size() >= e.flushSize || atomic.LoadInt64(&e.memBytes) >= e.maxMemBytes { // [cite: 198-199]
 			needsFlush = true
 		}
 	}
 
-	// 3. Quyết định xoay MemTable (nếu cần)
 	if needsFlush {
-		if err := e.rotateMemTable(); err != nil {
-			// Đây là một lỗi nghiêm trọng, batch đã được ghi vào WAL
-			// nhưng không thể xoay memtable.
-			// Chúng ta vẫn trả về lỗi "pending flushes"
-			// [cite: 151, 155]
+		if err := e.rotateMemTable(); err != nil { // [cite: 199-201]
 			return fmt.Errorf("rotate memtable: %w", err)
 		}
 	}
-
 	return nil
 }
-
-// --- KẾT THÚC MÃ MỚI ---
 
 // --- TÁI CẤU TRÚC (REFACTOR) Put và Delete ---
 
@@ -342,14 +455,15 @@ func (e *LSMEngine) Delete(key []byte) error {
 
 // --- KẾT THÚC TÁI CẤU TRÚC ---
 
-func (e *LSMEngine) Get(key []byte) ([]byte, error) {
+// Get
+// --- SỬA ĐỔI: Đọc từ Version (Levels) ---
+func (e *LSMEngine) Get(key []byte) ([]byte, error) { //
 	e.metrics.gets.Add(1)
-
 	k := string(key)
 
-	// Check active memtable
+	// 1. Check active memtable
 	e.mu.RLock()
-	if it, ok := e.mem.Get(k); ok { // [cite: 156]
+	if it, ok := e.mem.Get(k); ok { //
 		e.mu.RUnlock()
 		if it.Tombstone {
 			return nil, errors.New("key not found")
@@ -358,10 +472,10 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 	}
 	e.mu.RUnlock()
 
-	// Check immutable memtables
+	// 2. Check immutable memtables
 	e.immutMu.RLock()
 	for _, m := range e.immutables {
-		if it, ok := m.Get(k); ok { // [cite: 157]
+		if it, ok := m.Get(k); ok { //
 			e.immutMu.RUnlock()
 			if it.Tombstone {
 				return nil, errors.New("key not found")
@@ -371,20 +485,35 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 	}
 	e.immutMu.RUnlock()
 
-	// Search SST files (newest first)
-	files, err := os.ReadDir(e.sstDir)
-	if err == nil {
-		names := make([]string, 0, len(files))
-		for _, fi := range files {
-			if strings.HasSuffix(fi.Name(), ".sst") {
-				names = append(names, filepath.Join(e.sstDir, fi.Name()))
+	// 3. Search SST files (từ Version)
+	e.mu.RLock()
+	l0Files := e.current.Levels[0]
+	l1Files := e.current.Levels[1]
+	e.mu.RUnlock()
+
+	// 3a. Quét L0 (mới nhất -> cũ nhất)
+	// (L0 có thể chồng lấn, phải quét hết)
+	for i := len(l0Files) - 1; i >= 0; i-- {
+		meta := l0Files[i]
+		if k < meta.MinKey || k > meta.MaxKey {
+			continue // Tối ưu hóa: Bỏ qua tệp nếu key nằm ngoài phạm vi
+		}
+		if bv, tomb, err := ReadSSTFind(meta.Path, k); err == nil { //
+			if tomb {
+				return nil, errors.New("key not found")
+			}
+			if bv != nil {
+				return bv, nil
 			}
 		}
-		sort.Slice(names, func(i, j int) bool { return names[i] > names[j] })
+	}
 
-		for _, p := range names {
-			// Sử dụng ReadSSTFind đã được tối ưu hóa từ Giai đoạn 1
-			if bv, tomb, err := ReadSSTFind(p, k); err == nil { // [cite: 158]
+	// 3b. Quét L1 (đã sắp xếp, không chồng lấn)
+	for _, meta := range l1Files {
+		if k >= meta.MinKey && k <= meta.MaxKey {
+			// Vì L1 không chồng lấn, nếu key nằm trong
+			// phạm vi, nó PHẢI ở đây (hoặc không tồn tại)
+			if bv, tomb, err := ReadSSTFind(meta.Path, k); err == nil {
 				if tomb {
 					return nil, errors.New("key not found")
 				}
@@ -392,61 +521,60 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 					return bv, nil
 				}
 			}
+			// Nếu ReadSSTFind lỗi (os.ErrNotExist),
+			// chúng ta có thể dừng tìm L1
+			break
 		}
 	}
 
 	return nil, errors.New("key not found")
 }
 
-// --- BẮT ĐẦU MÃ MỚI: NewIterator ---
-func (e *LSMEngine) NewIterator() (Iterator, error) {
-	// Phải khóa RLock mem và immut
-	// Iterator sẽ tự động giải phóng khóa khi Close()
+// --- KẾT THÚC SỬA ĐỔI ---
+
+// NewIterator
+// --- SỬA ĐỔI: Đọc từ Version (Levels) ---
+func (e *LSMEngine) NewIterator() (engine.Iterator, error) {
 	e.mu.RLock()
 	e.immutMu.RLock()
 
-	iters := make([]Iterator, 0, len(e.immutables)+10)
+	iters := make([]engine.Iterator, 0, len(e.immutables)+10)
 
 	// 1. Thêm MemTable (mới nhất)
 	iters = append(iters, NewMemTableIterator(e.mem))
 
 	// 2. Thêm Immutables (thứ tự mới -> cũ)
-	// NewMemTableIterator sẽ giữ RLock của mỗi memtable
-	for i := len(e.immutables) - 1; i >= 0; i-- {
+	for i := len(e.immutables) - 1; i >= 0; i-- { //
 		iters = append(iters, NewMemTableIterator(e.immutables[i]))
 	}
 
-	// 3. Mở khóa RLock (vì iterator của memtable đã giữ)
 	e.immutMu.RUnlock()
-	e.mu.RUnlock()
 
-	// 4. Thêm SSTables (mới nhất -> cũ nhất)
-	files, err := os.ReadDir(e.sstDir)
-	if err != nil {
-		// Đóng các iterator mem/immut đã mở
-		for _, it := range iters {
-			it.Close()
-		}
-		return nil, fmt.Errorf("read sst dir: %w", err)
-	}
+	// 3. Thêm SSTables (từ Version)
+	l0Files := e.current.Levels[0]
+	l1Files := e.current.Levels[1]
+	e.mu.RUnlock() // Mở khóa chính
 
-	names := make([]string, 0, len(files))
-	for _, fi := range files {
-		if strings.HasSuffix(fi.Name(), ".sst") {
-			names = append(names, filepath.Join(e.sstDir, fi.Name()))
-		}
-	}
-	// Sắp xếp giảm dần (newest first)
-	sort.Slice(names, func(i, j int) bool { return names[i] > names[j] })
-
-	for _, p := range names {
-		it, err := NewSSTableIterator(p)
+	// 3a. L0 (mới nhất -> cũ nhất)
+	for i := len(l0Files) - 1; i >= 0; i-- {
+		it, err := NewSSTableIterator(l0Files[i].Path)
 		if err != nil {
-			// Lỗi nghiêm trọng, đóng tất cả
 			for _, it := range iters {
 				it.Close()
 			}
-			return nil, fmt.Errorf("open sst iterator %s: %w", p, err)
+			return nil, fmt.Errorf("open sst L0 iterator: %w", err)
+		}
+		iters = append(iters, it)
+	}
+
+	// 3b. L1 (sắp xếp theo key)
+	for _, meta := range l1Files {
+		it, err := NewSSTableIterator(meta.Path)
+		if err != nil {
+			for _, it := range iters {
+				it.Close()
+			}
+			return nil, fmt.Errorf("open sst L1 iterator: %w", err)
 		}
 		iters = append(iters, it)
 	}
@@ -454,8 +582,6 @@ func (e *LSMEngine) NewIterator() (Iterator, error) {
 	// 5. Trả về MergingIterator
 	return NewMergingIterator(iters), nil
 }
-
-// --- KẾT THÚC MÃ MỚI ---
 
 // ... (Các hàm IterKeys, streamSSTKeys, mapToSlice, rotateMemTable, DumpDB, RestoreDB, Close, GetMetrics giữ nguyên) ...
 // (Bỏ qua các hàm không thay đổi để tiết kiệm không gian)
@@ -628,30 +754,47 @@ func (e *LSMEngine) RestoreDB(path string) error {
 func (e *LSMEngine) Close() error {
 	slog.Info("Database closing...", "component", "lsm")
 
-	// 1. SỬA: Đẩy nốt dữ liệu RAM vào hàng đợi (nếu có)
+	// --- SỬA ĐỔI: Set cờ shuttingDown ---
+	e.mu.Lock()
+	if e.shuttingDown {
+		e.mu.Unlock()
+		return errors.New("database already closing")
+	}
+	e.shuttingDown = true
+	e.mu.Unlock()
+	// --- KẾT THÚC SỬA ĐỔI ---
+
+	// 1. Đẩy nốt dữ liệu RAM vào hàng đợi (nếu có)
 	if e.mem.Size() > 0 {
 		slog.Info("Scheduling active MemTable flush before shutdown...", "component", "lsm")
-		if err := e.rotateMemTable(); err != nil { // [cite: 172]
-			// Nếu hàng đợi đầy, chúng ta vẫn phải tiếp tục đóng
+		if err := e.rotateMemTable(); err != nil { // [cite: 214-215]
 			slog.Error("Failed to schedule final MemTable flush on close", "error", err)
 		}
 	}
-	// 2. SỬA: Đóng flushCh để báo worker là hết việc
+
+	// 2. Đóng flushCh
 	close(e.flushCh)
-	// 3. SỬA: Chờ worker xử lý xong và tự thoát
+
+	// 3. Đóng compactionCh
+	close(e.compactionCh)
+
+	// 4. Chờ worker
 	e.wg.Wait()
-	slog.Info("Flush worker finished.", "component", "lsm")
-	// (Bây giờ e.cancel() không còn cần thiết nữa, nhưng giữ lại cũng không sao)
+	slog.Info("All workers finished.", "component", "lsm")
+
 	e.cancel()
-	// 4. Đóng WAL (SAU KHI mọi thứ đã được flush an toàn)
+
+	// 5. Đóng WAL
 	if e.wal != nil {
-		if err := e.wal.Close(); err != nil { // [cite: 173]
+		if err := e.wal.Close(); err != nil { //
 			return err
 		}
 	}
 	slog.Info("Database closed gracefully.", "component", "lsm")
 	return nil
 }
+
+// --- KẾT THÚC SỬA ĐỔI ---
 
 func (e *LSMEngine) GetMetrics() map[string]int64 {
 	return map[string]int64{

@@ -2,14 +2,16 @@ package lsm
 
 import (
 	"container/heap"
+	// --- MỚI: Import engine ---
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
 // mergingIteratorItem là một wrapper cho container/heap
 // Nó giữ một iterator và giá trị (key/value) hiện tại của nó
 type mergingIteratorItem struct {
-	iter  Iterator
+	iter  engine.Iterator
 	key   string
-	value *Item
+	value *engine.Item
 }
 
 // mergingIteratorHeap là một min-heap của các iterator
@@ -44,33 +46,19 @@ func (h *mergingIteratorHeap) Pop() interface{} {
 // MergingIterator hợp nhất nhiều iterator
 type MergingIterator struct {
 	h     mergingIteratorHeap
-	iters []Iterator // Giữ tham chiếu đầy đủ để Close()
-
+	iters []engine.Iterator
 	key   string
-	value *Item
+	value *engine.Item
 	err   error
 }
 
-// NewMergingIterator tạo một iterator hợp nhất từ một danh sách các iterator con.
-// Danh sách `iters` phải được sắp xếp theo *thứ tự ưu tiên*
-// (ví dụ: MemTable, Immutable, rồi mới đến SSTables)
-// Mặc dù heap sắp xếp theo key, thứ tự ưu tiên quan trọng khi
-// de-dup (nhưng logic de-dup của chúng ta sẽ xử lý cả hai)
-//
-// Sửa lại: Logic của chúng ta xử lý de-dup và tombstone
-// dựa trên giả định rằng iterator mới nhất (MemTable)
-// sẽ được xử lý trước NẾU key giống hệt nhau.
-//
-// Sửa lại (Lần 3): Min-heap chỉ sắp xếp theo key.
-// Logic de-dup bên dưới mới là thứ xử lý
-// các key bị trùng.
-func NewMergingIterator(iters []Iterator) Iterator {
+// --- SỬA ĐỔI: Chấp nhận và trả về engine.Iterator ---
+func NewMergingIterator(iters []engine.Iterator) engine.Iterator {
 	mi := &MergingIterator{
 		h:     make(mergingIteratorHeap, 0, len(iters)),
-		iters: iters, // Lưu lại để Close()
+		iters: iters,
 	}
 
-	// Khởi tạo heap: Đẩy item đầu tiên của mỗi iterator vào
 	for _, iter := range iters {
 		if iter.Next() {
 			heap.Push(&mi.h, mergingIteratorItem{
@@ -84,17 +72,12 @@ func NewMergingIterator(iters []Iterator) Iterator {
 			break
 		}
 	}
-
-	// Nếu có lỗi trong khi khởi tạo, trả về một iterator lỗi
 	if mi.err != nil {
-		// Đóng tất cả những gì đã mở
 		for _, iter := range iters {
 			iter.Close()
 		}
-		// Trả về iterator rỗng nhưng có lỗi
 		return &MergingIterator{err: mi.err}
 	}
-
 	return mi
 }
 
@@ -162,7 +145,8 @@ func (it *MergingIterator) Key() string {
 	return it.key
 }
 
-func (it *MergingIterator) Value() *Item {
+// --- SỬA ĐỔI: Dùng engine.Item ---
+func (it *MergingIterator) Value() *engine.Item {
 	return it.value
 }
 

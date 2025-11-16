@@ -1,43 +1,51 @@
 package lsm
 
-// BatchEntry đại diện cho một thao tác (Put hoặc Delete) trong một Batch
-type BatchEntry struct {
+import (
+	// --- MỚI: Import engine ---
+	"github.com/nconghau/MiniDBGo/internal/engine"
+)
+
+// --- MỚI: Kiểm tra static ---
+var _ engine.Batch = (*lsmBatch)(nil)
+
+// --- SỬA ĐỔI: Đổi tên (nội bộ) ---
+type batchEntry struct {
 	Key       []byte
 	Value     []byte
 	Tombstone bool
 }
 
-// Batch là một tập hợp các thao tác ghi được thực hiện nguyên tử
-type Batch struct {
-	entries []*BatchEntry
+// --- SỬA ĐỔI: Đổi tên (nội bộ) ---
+type lsmBatch struct {
+	entries []*batchEntry
 }
 
-// NewBatch tạo một batch mới
-func NewBatch() *Batch {
-	return &Batch{
-		entries: make([]*BatchEntry, 0, 10), // Khởi tạo với capacity nhỏ
+// NewBatch (Hàm nội bộ)
+func NewBatch() *lsmBatch {
+	return &lsmBatch{
+		entries: make([]*batchEntry, 0, 10),
 	}
 }
 
-// Put thêm một thao tác Set/Put vào batch
-func (b *Batch) Put(key, value []byte) {
-	b.entries = append(b.entries, &BatchEntry{
+// Put triển khai engine.Batch
+func (b *lsmBatch) Put(key, value []byte) {
+	b.entries = append(b.entries, &batchEntry{
 		Key:       key,
-		Value:     value,
+		Value:     value, // [cite: 161-162]
 		Tombstone: false,
 	})
 }
 
-// Delete thêm một thao tác Xóa vào batch
-func (b *Batch) Delete(key []byte) {
-	b.entries = append(b.entries, &BatchEntry{
+// Delete triển khai engine.Batch
+func (b *lsmBatch) Delete(key []byte) {
+	b.entries = append(b.entries, &batchEntry{
 		Key:       key,
-		Value:     nil, // Giá trị là nil đối với tombstone
+		Value:     nil,
 		Tombstone: true,
 	})
 }
 
-// Size trả về số lượng thao tác trong batch
-func (b *Batch) Size() int {
+// Size triển khai engine.Batch
+func (b *lsmBatch) Size() int {
 	return len(b.entries)
 }

@@ -9,6 +9,8 @@ import (
 	"runtime/debug"
 
 	"github.com/chzyer/readline"
+	// --- SỬA ĐỔI: Import cả hai ---
+
 	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
@@ -48,16 +50,22 @@ func main() {
 		maxMemBytes = mb * 1024 * 1024
 	}
 
+	// --- SỬA ĐỔI: Gọi lsm.OpenLSMWithConfig và gán cho engine.Engine ---
+	// Đây là nơi chúng ta kết nối implementation và interface
 	db, err := lsm.OpenLSMWithConfig("data/MiniDBGo", flushSize, maxMemBytes)
 	if err != nil {
 		slog.Error("Failed to open database", "error", err)
 		os.Exit(1)
 	}
+
+	// Chúng ta vẫn cần defer Close() trong trường hợp
+	// CLI thoát (gõ "exit")
 	defer func() {
-		slog.Info("Closing database")
-		if err := db.Close(); err != nil {
-			slog.Error("Database close error", "error", err)
-		}
+		slog.Info("Closing database (from main defer)")
+		// Không cần kiểm tra lỗi ở đây nữa,
+		// vì lỗi "already closing" là có thể xảy ra
+		// và đã được xử lý bởi handleShutdown.
+		_ = db.Close()
 	}()
 
 	// Start HTTP server with graceful shutdown

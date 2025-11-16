@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
 const (
@@ -134,7 +136,7 @@ func (w *SSTWriter) flushCurrentBlock() error {
 
 // WriteEntry writes a single key-value entry
 // --- SỬA ĐỔI: Ghi vào bộ đệm khối (block buffer) ---
-func (w *SSTWriter) WriteEntry(key string, item *Item) error {
+func (w *SSTWriter) WriteEntry(key string, item *engine.Item) error {
 	if w.count == 0 {
 		w.minKey = key
 	}
@@ -289,7 +291,7 @@ func (w *SSTWriter) GetMetadata() *SSTMetadata {
 }
 
 // WriteSST (Không thay đổi)
-func WriteSST(dir string, level, seq int, items map[string]*Item) (string, error) {
+func WriteSST(dir string, level, seq int, items map[string]*engine.Item) (string, error) {
 	if len(items) == 0 {
 		return "", fmt.Errorf("no items to write")
 	}

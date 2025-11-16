@@ -2,105 +2,111 @@ package lsm
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
-// Compact merges all SST files at level 0 into one bigger SST
-// --- SỬA ĐỔI: Viết lại hoàn toàn bằng MergingIterator ---
-func (e *LSMEngine) Compact() error {
-	files, err := os.ReadDir(e.sstDir)
-	if err != nil {
-		return err
+// runCompaction thực hiện logic nén L0 -> L1
+// Nó được gọi bởi compactionWorker và nắm giữ compactMu
+func (e *LSMEngine) runCompaction() error {
+	e.mu.RLock()
+	l0Files := make([]*FileMetadata, len(e.current.Levels[0]))
+	copy(l0Files, e.current.Levels[0])
+	e.mu.RUnlock()
+
+	if len(l0Files) == 0 {
+		return nil // Không có gì để nén
 	}
 
-	var ssts []string
-	for _, fi := range files {
-		if strings.HasSuffix(fi.Name(), ".sst") {
-			ssts = append(ssts, filepath.Join(e.sstDir, fi.Name())) //
-		}
-	}
-	if len(ssts) <= 1 {
-		return nil // nothing to compact
-	}
-	// Sắp xếp ssts (mặc dù MergingIterator không yêu cầu,
-	// nhưng việc này tốt cho việc theo dõi)
-	sort.Strings(ssts)
+	slog.Info("Starting L0->L1 compaction", "files", len(l0Files))
 
-	// 1. Tạo một iterator cho mỗi SSTable
-	iters := make([]Iterator, 0, len(ssts))
-	for _, path := range ssts {
-		// NewSSTableIterator (từ iterator.go) đọc SST hiệu quả
-		it, err := NewSSTableIterator(path)
+	// 1. Tạo MergingIterator cho TẤT CẢ các tệp L0
+	iters := make([]engine.Iterator, 0, len(l0Files))
+	for _, meta := range l0Files {
+		it, err := NewSSTableIterator(meta.Path)
 		if err != nil {
-			// Đóng tất cả iterator đã mở nếu có lỗi
-			for _, openedIt := range iters {
-				openedIt.Close()
+			for _, it := range iters {
+				it.Close()
 			}
-			return err
+			return fmt.Errorf("create compaction iterator: %w", err)
 		}
 		iters = append(iters, it)
 	}
-
-	// 2. Tạo MergingIterator
-	// (Nó sẽ tự động xử lý de-dup và tombstones)
 	mergedIter := NewMergingIterator(iters)
 	defer mergedIter.Close()
 
-	// 3. Chuẩn bị tệp SST mới
-	e.mu.Lock() // Bảo vệ e.seq
-	e.seq++
+	// 2. Tạo SSTable L1 mới
+	e.mu.Lock()
 	seq := e.seq
+	e.seq++
 	e.mu.Unlock()
 
-	// (Giả sử L1, mặc dù chúng ta chưa có logic cấp độ đầy đủ)
-	tempPath := filepath.Join(e.sstDir, "temp-compaction.tmp")
-	writer, err := NewSSTWriter(tempPath, 0) // 0 = unknown size
+	path := filepath.Join(e.sstDir, fmt.Sprintf("sst-L1-%06d.sst", seq))
+	writer, err := NewSSTWriter(path, 0) // Kích thước không xác định
 	if err != nil {
 		return err
 	}
 
-	// 4. Lặp và Ghi (Stream)
+	// 3. Stream từ iterator (L0) sang writer (L1)
 	hasEntries := false
 	for mergedIter.Next() {
-		// MergingIterator đã tự động bỏ qua tombstones [cite: 433-435]
+		// MergingIterator đã xử lý tombstones và de-dup
 		if err := writer.WriteEntry(mergedIter.Key(), mergedIter.Value()); err != nil {
 			writer.Close()
-			os.Remove(tempPath)
+			os.Remove(path)
 			return err
 		}
 		hasEntries = true
 	}
 	if err := mergedIter.Error(); err != nil {
 		writer.Close()
-		os.Remove(tempPath)
+		os.Remove(path)
 		return err
 	}
-
 	if err := writer.Close(); err != nil {
-		os.Remove(tempPath)
+		os.Remove(path)
 		return err
 	}
 
-	// Nếu không có entry nào (tất cả đều là rác), chỉ cần xóa file
-	if !hasEntries {
-		os.Remove(tempPath)
-	} else {
-		// Đổi tên tệp SST mới
-		newPath := filepath.Join(e.sstDir, fmt.Sprintf("sst-L1-%06d.sst", seq))
-		if err := os.Rename(tempPath, newPath); err != nil {
-			os.Remove(tempPath)
-			return err
+	var newL1Meta *FileMetadata
+	if hasEntries {
+		meta := writer.GetMetadata()
+		newL1Meta = &FileMetadata{
+			Level:    1, // Cấp L1
+			Path:     path,
+			MinKey:   meta.MinKey,
+			MaxKey:   meta.MaxKey,
+			FileSize: meta.FileSize,
+			KeyCount: meta.KeyCount,
+		}
+	}
+
+	// 4. Cập nhật MANIFEST (atomic)
+	e.mu.Lock()
+	// Xóa tệp L0 cũ
+	e.current.DeleteFiles(0, l0Files)
+	// Thêm tệp L1 mới (nếu có)
+	if newL1Meta != nil {
+		e.current.AddFile(newL1Meta)
+	}
+	// Lưu trạng thái mới
+	if err := e.saveManifest(); err != nil {
+		e.mu.Unlock()
+		slog.Error("CRITICAL: Failed to save manifest after compaction", "error", err)
+		return err
+	}
+	e.mu.Unlock()
+
+	// 5. Xóa các tệp L0 cũ (sau khi MANIFEST đã an toàn)
+	for _, meta := range l0Files {
+		if err := os.Remove(meta.Path); err != nil {
+			slog.Warn("Failed to delete old L0 file after compaction", "path", meta.Path, "error", err)
 		}
 	}
 
 	e.metrics.compacts.Add(1)
-
-	// 5. Xóa các tệp SST cũ
-	for _, p := range ssts {
-		_ = os.Remove(p)
-	}
 	return nil
 }
