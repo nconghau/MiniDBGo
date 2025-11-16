@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/nconghau/MiniDBGo/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
 // RunCLI runs the interactive shell for MiniDBGo.
-func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
+// --- SỬA ĐỔI: Chấp nhận interface ---
+func RunCLI(db engine.Engine, rl *readline.Instance) { //
 	for {
 		line, err := rl.Readline()
 		if err != nil {
@@ -24,6 +25,8 @@ func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
 
 		cmd, rest := splitCmdRest(line)
 		switch strings.ToLower(cmd) {
+		// (Các case này [cite: 239-240] trỏ đến các hàm trong commands.go,
+		// vốn đã chấp nhận 'engine.Engine')
 		case "insertone":
 			handleInsertOne(db, rest)
 		case "insertmany":
@@ -37,7 +40,7 @@ func RunCLI(db *lsm.LSMEngine, rl *readline.Instance) {
 		case "deleteone":
 			handleDeleteOne(db, rest)
 		case "dumpall":
-			handleDumpAll(db, rest)
+			handleDumpAll(db, rest) // [cite: 240]
 		case "dumpdb":
 			handleDumpDB(db, rest)
 		case "restoredb":

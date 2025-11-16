@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nconghau/MiniDBGo/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
 // insertOne <collection> <jsonDoc>
-func handleInsertOne(db *lsm.LSMEngine, rest string) {
+func handleInsertOne(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 2)
 	if len(parts) < 2 {
 		fmt.Println("Usage: insertOne <collection> <jsonDoc>")
@@ -40,7 +40,7 @@ func handleInsertOne(db *lsm.LSMEngine, rest string) {
 }
 
 // insertMany <collection> <jsonArrayOfDocs>
-func handleInsertMany(db *lsm.LSMEngine, rest string) {
+func handleInsertMany(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 2)
 	if len(parts) < 2 {
 		fmt.Println("Usage: insertMany <collection> <jsonArrayOfDocs>")
@@ -50,7 +50,7 @@ func handleInsertMany(db *lsm.LSMEngine, rest string) {
 	docStr := parts[1]
 
 	var docs []map[string]interface{}
-	if err := json.Unmarshal([]byte(docStr), &docs); err != nil {
+	if err := json.Unmarshal([]byte(docStr), &docs); err != nil { // [cite: 40]
 		fmt.Println("Invalid JSON Array:", err)
 		return
 	}
@@ -59,6 +59,10 @@ func handleInsertMany(db *lsm.LSMEngine, rest string) {
 		fmt.Println("No documents to insert.")
 		return
 	}
+
+	// --- BẮT ĐẦU MÃ MỚI ---
+	batch := db.NewBatch()
+	// --- KẾT THÚC MÃ MỚI ---
 
 	insertedCount := 0
 	for i, doc := range docs {
@@ -70,17 +74,28 @@ func handleInsertMany(db *lsm.LSMEngine, rest string) {
 
 		key := col + ":" + id
 		raw, _ := json.Marshal(doc)
-		if err := db.Put([]byte(key), raw); err != nil {
-			fmt.Printf("Error inserting %s: %v\n", id, err)
-			continue // Bỏ qua tài liệu này
-		}
+
+		// --- SỬA ĐỔI: Thêm vào batch ---
+		batch.Put([]byte(key), raw)
+		// Logic db.Put() cũ [cite: 41] đã bị xóa
+		// --- KẾT THÚC SỬA ĐỔI ---
 		insertedCount++
 	}
+
+	// --- BẮT ĐẦU MÃ MỚI ---
+	// Áp dụng batch
+	if err := db.ApplyBatch(batch); err != nil {
+		fmt.Printf("Error inserting batch: %v\n", err)
+		// Không in ra số lượng, vì batch đã thất bại
+		return
+	}
+	// --- KẾT THÚC MÃ MỚI ---
+
 	fmt.Printf("Inserted %d of %d documents into %s\n", insertedCount, len(docs), col)
 }
 
 // findOne <collection> <jsonFilter>
-func handleFindOne(db *lsm.LSMEngine, rest string) {
+func handleFindOne(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 2)
 	if len(parts) < 2 {
 		fmt.Println("Usage: findOne <collection> <jsonFilter>")
@@ -109,7 +124,7 @@ func handleFindOne(db *lsm.LSMEngine, rest string) {
 }
 
 // findMany <collection> <jsonFilter>
-func handleFindMany(db *lsm.LSMEngine, rest string) {
+func handleFindMany(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 2)
 	if len(parts) < 2 {
 		fmt.Println("Usage: findMany <collection> <jsonFilter>")
@@ -119,44 +134,51 @@ func handleFindMany(db *lsm.LSMEngine, rest string) {
 	filterStr := parts[1]
 
 	var filter map[string]interface{}
-	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil {
+	if err := json.Unmarshal([]byte(filterStr), &filter); err != nil { // [cite: 43]
 		fmt.Println("Invalid filter JSON:", err)
 		return
 	}
 
-	// --- FIX: Use IterKeysWithLimit to prevent OOM ---
-	// Use a large limit for CLI, same as server's MaxKeysToReturn
-	keys, _ := db.IterKeysWithLimit(10000)
+	it, err := db.NewIterator()
+	if err != nil {
+		fmt.Println("Iterator error:", err)
+		return
+	}
+	defer it.Close()
 
 	matchCount := 0
-	for _, k := range keys {
-		if !strings.HasPrefix(k, col+":") {
+	prefix := col + ":"
+
+	for it.Next() {
+		key := it.Key()
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 
-		// --- FIX: Limit number of results returned ---
-		if matchCount >= 1000 { // Same limit as server [cite: 41]
+		if matchCount >= 1000 { // Giới hạn như cũ
 			fmt.Println("... (results truncated at 1000)")
 			break
 		}
 
-		val, err := db.Get([]byte(k))
-		if err != nil {
-			continue
-		}
+		val := it.Value().Value
 		var doc map[string]interface{}
-		if err := json.Unmarshal(val, &doc); err != nil {
+		if err := json.Unmarshal(val, &doc); err != nil { // [cite: 44]
 			continue
 		}
+
 		if matchFilter(doc, filter) {
 			fmt.Println(prettyJSON(val))
 			matchCount++
 		}
 	}
+
+	if err := it.Error(); err != nil {
+		fmt.Println("Iterator error:", err)
+	}
 }
 
 // updateOne <collection> <jsonFilter> <jsonUpdate>
-func handleUpdateOne(db *lsm.LSMEngine, rest string) {
+func handleUpdateOne(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 3)
 	if len(parts) < 3 {
 		fmt.Println("Usage: updateOne <collection> <jsonFilter> <jsonUpdate>")
@@ -205,7 +227,7 @@ func handleUpdateOne(db *lsm.LSMEngine, rest string) {
 }
 
 // deleteOne <collection> <jsonFilter>
-func handleDeleteOne(db *lsm.LSMEngine, rest string) {
+func handleDeleteOne(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 2)
 	if len(parts) < 2 {
 		fmt.Println("Usage: deleteOne <collection> <jsonFilter>")
@@ -232,8 +254,9 @@ func handleDeleteOne(db *lsm.LSMEngine, rest string) {
 	fmt.Println("Deleted", id, "from", col)
 }
 
-// dumpAll <collection>
-func handleDumpAll(db *lsm.LSMEngine, rest string) {
+// handleDumpAll
+// --- SỬA ĐỔI: Viết lại hoàn toàn bằng Iterator ---
+func handleDumpAll(db engine.Engine, rest string) { //
 	parts := splitArgs(rest, 1)
 	if len(parts) < 1 {
 		fmt.Println("Usage: dumpAll <collection>")
@@ -241,29 +264,40 @@ func handleDumpAll(db *lsm.LSMEngine, rest string) {
 	}
 	col := parts[0]
 
-	// --- FIX: Use IterKeysWithLimit to prevent OOM ---
-	keys, _ := db.IterKeysWithLimit(10000) // Use a large limit
+	it, err := db.NewIterator()
+	if err != nil {
+		fmt.Println("Iterator error:", err)
+		return
+	}
+	defer it.Close()
+
+	// Logic OOM cũ dùng IterKeysWithLimit bị xóa
 
 	matchCount := 0
-	for _, k := range keys {
-		if strings.HasPrefix(k, col+":") {
-			// --- FIX: Limit number of results returned ---
+	prefix := col + ":"
+
+	for it.Next() {
+		if strings.HasPrefix(it.Key(), prefix) {
 			if matchCount >= 1000 {
 				fmt.Println("... (results truncated at 1000)")
 				break
 			}
 
-			val, err := db.Get([]byte(k))
-			if err == nil {
-				fmt.Println(prettyJSON(val))
-				matchCount++
-			}
+			val := it.Value().Value
+			fmt.Println(prettyJSON(val))
+			matchCount++
 		}
+	}
+
+	if err := it.Error(); err != nil {
+		fmt.Println("Iterator error:", err)
 	}
 }
 
+// --- KẾT THÚC SỬA ĐỔI ---
+
 // dumpDB
-func handleDumpDB(db *lsm.LSMEngine, rest string) {
+func handleDumpDB(db engine.Engine, rest string) {
 	file := fmt.Sprintf("dump_%s.json", time.Now().Format("150405_02012006"))
 	if err := db.DumpDB(file); err != nil {
 		fmt.Println("Dump error:", err)
@@ -273,7 +307,7 @@ func handleDumpDB(db *lsm.LSMEngine, rest string) {
 }
 
 // restoreDB <file.json>
-func handleRestoreDB(db *lsm.LSMEngine, rest string) {
+func handleRestoreDB(db engine.Engine, rest string) {
 	parts := splitArgs(rest, 1)
 	if len(parts) < 1 {
 		fmt.Println("Usage: restoreDB <file.json>")
@@ -288,7 +322,7 @@ func handleRestoreDB(db *lsm.LSMEngine, rest string) {
 }
 
 // compact
-func handleCompact(db *lsm.LSMEngine) {
+func handleCompact(db engine.Engine) {
 	if err := db.Compact(); err != nil {
 		fmt.Println("Compact error:", err)
 		return

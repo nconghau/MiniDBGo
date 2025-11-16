@@ -29,7 +29,7 @@ echo "Output will be saved to: $OUTPUT_FILE"
   # -o: OR condition.
   # -print0: prints the full file path followed by a null character,
   #          which handles filenames with spaces or special characters safely.
-  find . -path ./client -prune -o -type f \( -name "*.go" -o -name "*.md" -o -name "go.mod" -o -name "go.sum" \) -print0 | \
+  find . -path ./client -prune -o -type f \( -name "*.go" -o -name "*.md" -o -name "go.mod" -o -name "go.sum" -o -name ".env" \) -print0 | \
 
   # Pipe the null-separated list of files to a 'while' loop.
   # IFS= read -r -d '': reads the input safely, respecting special characters.

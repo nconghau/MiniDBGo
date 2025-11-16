@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/nconghau/MiniDBGo/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/engine"
 	"github.com/rs/cors"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/mem"
@@ -42,7 +42,7 @@ const (
 )
 
 type Server struct {
-	db         *lsm.LSMEngine
+	db         engine.Engine
 	httpServer *http.Server
 	semaphore  chan struct{}
 	shutdown   chan os.Signal
@@ -50,7 +50,7 @@ type Server struct {
 }
 
 // startHttpServer starts the web server with graceful shutdown
-func startHttpServer(db *lsm.LSMEngine, addr string) *Server {
+func startHttpServer(db engine.Engine, addr string) *Server {
 	s := &Server{
 		db:        db,
 		semaphore: make(chan struct{}, MaxConcurrentReq),
@@ -233,21 +233,35 @@ type CollectionInfo struct {
 	ByteSize int64  `json:"byteSize"`
 }
 
+// --- SỬA ĐỔI: Viết lại bằng Iterator ---
 func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
-	// Use limited iteration to prevent OOM
-	keys, err := s.db.IterKeysWithLimit(MaxKeysToReturn) // Get keys efficiently
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to read keys")
-		return
-	}
-
 	colCounts := make(map[string]int)
 
-	for _, k := range keys {
-		if idx := strings.Index(k, ":"); idx >= 0 {
-			colName := k[:idx]
+	it, err := s.db.NewIterator()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to create iterator")
+		return
+	}
+	defer it.Close()
+
+	count := 0
+	for it.Next() {
+		// Giới hạn tổng số key quét (phòng thủ)
+		count++
+		if count > MaxKeysToReturn {
+			break
+		}
+
+		key := it.Key()
+		if idx := strings.Index(key, ":"); idx >= 0 { //
+			colName := key[:idx]
 			colCounts[colName]++
 		}
+	}
+
+	if err := it.Error(); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed during iteration")
+		return
 	}
 
 	colsInfo := make([]CollectionInfo, 0, len(colCounts))
@@ -265,6 +279,8 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, colsInfo)
 }
+
+// --- KẾT THÚC SỬA ĐỔI ---
 
 func (s *Server) handleInsertOne(w http.ResponseWriter, r *http.Request, collection string) {
 	body, err := io.ReadAll(r.Body)
@@ -301,6 +317,8 @@ func (s *Server) handleInsertOne(w http.ResponseWriter, r *http.Request, collect
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"status": "created", "key": string(key)})
 }
 
+// handleInsertMany
+// --- SỬA ĐỔI: Dùng interface ---
 func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var docs []map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&docs); err != nil {
@@ -308,17 +326,16 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 		return
 	}
 	defer r.Body.Close()
-
 	if len(docs) == 0 {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "insertedCount": 0})
 		return
 	}
-
-	// Limit batch size to prevent OOM
 	if len(docs) > 1000 {
 		writeError(w, http.StatusBadRequest, "Too many documents (max 1000 per batch)")
 		return
 	}
+
+	batch := s.db.NewBatch() // Hoạt động vì db là interface
 
 	insertedCount := 0
 	for i, doc := range docs {
@@ -328,7 +345,6 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
-
 		key := []byte(collection + ":" + id)
 		raw, err := json.Marshal(doc)
 		if err != nil {
@@ -336,17 +352,18 @@ func (s *Server) handleInsertMany(w http.ResponseWriter, r *http.Request, collec
 			writeError(w, http.StatusInternalServerError, msg)
 			return
 		}
+		batch.Put(key, raw)
+		insertedCount++
+	}
 
-		if err := s.db.Put(key, raw); err != nil {
-			if strings.Contains(err.Error(), "too many pending flushes") {
-				writeError(w, http.StatusServiceUnavailable, "Database is busy, please retry")
-				return
-			}
-			msg := fmt.Sprintf("Error inserting document %s: %v", id, err)
-			writeError(w, http.StatusInternalServerError, msg)
+	if err := s.db.ApplyBatch(batch); err != nil { // Hoạt động vì db là interface
+		if strings.Contains(err.Error(), "too many pending flushes") { // [cite: 15]
+			writeError(w, http.StatusServiceUnavailable, "Database is busy, please retry")
 			return
 		}
-		insertedCount++
+		msg := fmt.Sprintf("Error inserting batch: %v", err)
+		writeError(w, http.StatusInternalServerError, msg)
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "ok", "insertedCount": insertedCount})
@@ -400,51 +417,57 @@ func (s *Server) handleDeleteDocument(w http.ResponseWriter, r *http.Request, ke
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "key": string(key)})
 }
 
+// handleFindMany
+// --- SỬA ĐỔI: Viết lại hoàn toàn bằng Iterator ---
 func (s *Server) handleFindMany(w http.ResponseWriter, r *http.Request, collection string) {
 	var filter map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil { // [cite: 19]
 		writeError(w, http.StatusBadRequest, "Invalid JSON filter")
 		return
 	}
 	defer r.Body.Close()
 
-	// Stream results instead of loading all into memory
 	results := make([]map[string]interface{}, 0, 100)
 
-	// Use limited iteration
-	keys, err := s.db.IterKeysWithLimit(MaxKeysToReturn)
+	it, err := s.db.NewIterator()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to iterate keys")
+		writeError(w, http.StatusInternalServerError, "Failed to create iterator")
 		return
 	}
+	defer it.Close()
 
 	prefix := collection + ":"
 	matchCount := 0
 
-	for _, k := range keys {
-		if !strings.HasPrefix(k, prefix) {
+	for it.Next() {
+		key := it.Key()
+
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 
-		// Limit results to prevent OOM
+		// Giới hạn kết quả trả về
 		if matchCount >= 1000 {
 			break
 		}
 
-		val, err := s.db.Get([]byte(k))
-		if err != nil {
-			continue
-		}
+		// Lấy giá trị trực tiếp từ iterator
+		val := it.Value().Value
 
 		var doc map[string]interface{}
-		if err := json.Unmarshal(val, &doc); err != nil {
-			continue
+		if err := json.Unmarshal(val, &doc); err != nil { // [cite: 20]
+			continue // Bỏ qua JSON hỏng
 		}
 
 		if matchFilter(doc, filter) {
 			results = append(results, doc)
 			matchCount++
 		}
+	}
+
+	if err := it.Error(); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed during iteration")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, results)

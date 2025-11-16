@@ -3,12 +3,12 @@ package main
 import (
 	"strings"
 
-	"github.com/nconghau/MiniDBGo/internal/lsm"
+	"github.com/nconghau/MiniDBGo/internal/engine"
 )
 
 // completer implements readline.AutoCompleter
 type completer struct {
-	db *lsm.LSMEngine
+	db engine.Engine
 }
 
 var allCommands = []string{
@@ -63,35 +63,45 @@ func (c completer) Do(line []rune, pos int) ([][]rune, int) {
 		// completing command name
 		return matchAndExpand(allCommands, token), replaceLen
 	case 1:
-		// completing collection name — only suggest if command expects a collection
-		// determine command name (first token from full line)
+		// completing collection name
 		cmdName := ""
 		allFields := strings.Fields(s)
 		if len(allFields) > 0 {
 			cmdName = allFields[0]
 		}
 		cmdName = strings.ToLower(cmdName)
-
-		// commands that take a collection as 1st arg
 		cmdsWithColl := map[string]bool{
 			"insertone": true, "insertmany": true, "findone": true, "findmany": true,
 			"updateone": true, "deleteone": true, "dumpall": true,
 		}
 		if !cmdsWithColl[cmdName] {
-			return nil, 0
+			return nil, 0 // [cite: 61]
 		}
 
-		// --- ⬇️  FIXED: Use memory-safe IterKeysWithLimit ⬇️ ---
-		// Use a large limit, same as other CLI commands.
-		keys, _ := c.db.IterKeysWithLimit(10000)
-		// --- ⬆️  END FIX ⬆️ ---
-
+		// --- SỬA ĐỔI: Dùng Iterator thay vì IterKeysWithLimit [cite: 62] ---
 		colSet := map[string]struct{}{}
-		for _, k := range keys {
-			if idx := strings.Index(k, ":"); idx >= 0 {
+
+		it, err := c.db.NewIterator()
+		if err != nil {
+			return nil, 0 // Không thể lấy iterator
+		}
+		defer it.Close()
+
+		count := 0
+		for it.Next() {
+			// Giới hạn số key quét để autocomplete không bị chậm
+			count++
+			if count > 10000 {
+				break
+			}
+
+			k := it.Key()
+			if idx := strings.Index(k, ":"); idx >= 0 { // [cite: 63]
 				colSet[k[:idx]] = struct{}{}
 			}
 		}
+		// --- KẾT THÚC SỬA ĐỔI ---
+
 		cols := make([]string, 0, len(colSet))
 		for col := range colSet {
 			cols = append(cols, col)
