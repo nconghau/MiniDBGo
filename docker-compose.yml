@@ -14,19 +14,27 @@ services:
     environment:
       - MODE=server
       - DB_PATH=/data/MiniDBGo
-      - GOMEMLIMIT=128MiB    # Crucial: Go runtime memory limit 
-      - MAX_MEM_MB=2        # Smaller memtable 
-      - FLUSH_SIZE=10000      # Flush more frequently 
-      - GOGC=30              # More aggressive garbage collection
+      - GOMEMLIMIT=128MiB    
+      - MAX_MEM_MB=16        
+      - FLUSH_SIZE=50000     
+      - GOGC=30              
     restart: unless-stopped
+    
     deploy:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
+          memory: 256M       
         reservations:
-          cpus: "0.5"
-          memory: 256M   
+          cpus: "0.2"       
+          memory: 128M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6866/api/health"]
       interval: 30s     
@@ -48,14 +56,21 @@ services:
       minidbgo:
         condition: service_healthy
     restart: unless-stopped
+    
     deploy:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M 
+          memory: 128M      
         reservations:
-          cpus: "0.2"
-          memory: 128M
+          cpus: "0.1"
+          memory: 32M
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 
 #docker compose up -d --build

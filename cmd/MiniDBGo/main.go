@@ -21,27 +21,17 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	// Set memory limit (optional but recommended)
 	if memLimit := os.Getenv("GOMEMLIMIT"); memLimit != "" {
 		slog.Info("Main set", "value", memLimit)
 	}
-
-	// Set GOGC for better memory management
-	// Lower values = more frequent GC = less memory usage
-	debug.SetGCPercent(30) // Default is 100
-
-	// Limit goroutines
+	debug.SetGCPercent(30)
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
 	slog.Info("Starting MiniDBGo", "pid", os.Getpid())
 
-	// Open database with production settings
-	flushSize := int64(10000)             // 10000 =  10k records
-	maxMemBytes := int64(2 * 1024 * 1024) // 2 = 2MB
+	flushSize := int64(10000)              // 10000 =  10k records
+	maxMemBytes := int64(16 * 1024 * 1024) // 16 = 16MB
 
-	// Allow configuration via environment
 	if val := os.Getenv("FLUSH_SIZE"); val != "" {
-		// Dùng strconv.ParseInt để an toàn hơn
 		if fs, err := strconv.ParseInt(val, 10, 64); err == nil {
 			flushSize = fs
 		}
@@ -52,7 +42,6 @@ func main() {
 		}
 	}
 
-	// Đây là nơi chúng ta kết nối implementation và interface
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "data/MiniDBGo" // Giá trị mặc định (cho chạy local không docker)
@@ -64,13 +53,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Chúng ta vẫn cần defer Close() trong trường hợp
-	// CLI thoát (gõ "exit")
 	defer func() {
 		slog.Info("Closing database (from main defer)")
-		// Không cần kiểm tra lỗi ở đây nữa,
-		// vì lỗi "already closing" là có thể xảy ra
-		// và đã được xử lý bởi handleShutdown.
 		_ = db.Close()
 	}()
 
