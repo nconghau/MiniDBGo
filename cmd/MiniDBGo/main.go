@@ -19,7 +19,7 @@ func main() {
 
 	// Set up structured JSON logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelDebug, // Log all levels (Debug, Info, Warn, Error)
+		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(logger)
 
