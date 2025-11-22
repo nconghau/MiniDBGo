@@ -38,7 +38,7 @@ const (
 	IdleTimeout        = 60 * time.Second
 
 	// Rate limiting
-	MaxKeysToReturn = 10000
+	// MaxKeysToReturn = 10000
 )
 
 type Server struct {
@@ -248,9 +248,9 @@ func (s *Server) handleGetCollections(w http.ResponseWriter, r *http.Request) {
 	for it.Next() {
 		// Giới hạn tổng số key quét (phòng thủ)
 		count++
-		if count > MaxKeysToReturn {
-			break
-		}
+		// if count > MaxKeysToReturn {
+		// 	break
+		// }
 
 		key := it.Key()
 		if idx := strings.Index(key, ":"); idx >= 0 { //

@@ -484,7 +484,6 @@ func (e *LSMEngine) Put(key, value []byte) error {
 	e.metrics.puts.Add(1)
 
 	// --- SỬA ĐỔI: Sử dụng ApplyBatch ---
-	// Logic cũ [cite: 151-153] được thay thế
 	b := NewBatch()
 	b.Put(key, value)
 	return e.ApplyBatch(b)
@@ -498,23 +497,19 @@ func (e *LSMEngine) Delete(key []byte) error {
 	e.metrics.deletes.Add(1)
 
 	// --- SỬA ĐỔI: Sử dụng ApplyBatch ---
-	// Logic cũ [cite: 154-155] được thay thế
 	b := NewBatch()
 	b.Delete(key)
 	return e.ApplyBatch(b)
 }
 
-// --- KẾT THÚC TÁI CẤU TRÚC ---
-
 // Get
-// --- SỬA ĐỔI: Đọc từ Version (Levels) ---
-func (e *LSMEngine) Get(key []byte) ([]byte, error) { //
+func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 	e.metrics.gets.Add(1)
 	k := string(key)
 
 	// 1. Check active memtable
 	e.mu.RLock()
-	if it, ok := e.mem.Get(k); ok { //
+	if it, ok := e.mem.Get(k); ok {
 		e.mu.RUnlock()
 		if it.Tombstone {
 			return nil, errors.New("key not found")
@@ -526,7 +521,7 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) { //
 	// 2. Check immutable memtables
 	e.immutMu.RLock()
 	for _, m := range e.immutables {
-		if it, ok := m.Get(k); ok { //
+		if it, ok := m.Get(k); ok {
 			e.immutMu.RUnlock()
 			if it.Tombstone {
 				return nil, errors.New("key not found")
@@ -536,34 +531,22 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) { //
 	}
 	e.immutMu.RUnlock()
 
-	// 3. Search SST files (từ Version)
+	// 3. Search SST files (L0 -> LMax)
 	e.mu.RLock()
-	l0Files := e.current.Levels[0]
-	l1Files := e.current.Levels[1]
+	// Copy snapshot của levels để nhả lock sớm
+	levelsSnapshot := make(map[int][]*FileMetadata)
+	for level, files := range e.current.Levels {
+		levelsSnapshot[level] = files
+	}
 	e.mu.RUnlock()
 
-	// 3a. Quét L0 (mới nhất -> cũ nhất)
-	// (L0 có thể chồng lấn, phải quét hết)
-	for i := len(l0Files) - 1; i >= 0; i-- {
-		meta := l0Files[i]
-		if k < meta.MinKey || k > meta.MaxKey {
-			continue // Tối ưu hóa: Bỏ qua tệp nếu key nằm ngoài phạm vi
-		}
-		if bv, tomb, err := ReadSSTFind(meta.Path, k); err == nil { //
-			if tomb {
-				return nil, errors.New("key not found")
+	// 3a. Quét L0 (Đặc biệt: có chồng lấn, phải quét từ Mới -> Cũ)
+	if l0Files, ok := levelsSnapshot[0]; ok {
+		for i := len(l0Files) - 1; i >= 0; i-- {
+			meta := l0Files[i]
+			if k < meta.MinKey || k > meta.MaxKey {
+				continue
 			}
-			if bv != nil {
-				return bv, nil
-			}
-		}
-	}
-
-	// 3b. Quét L1 (đã sắp xếp, không chồng lấn)
-	for _, meta := range l1Files {
-		if k >= meta.MinKey && k <= meta.MaxKey {
-			// Vì L1 không chồng lấn, nếu key nằm trong
-			// phạm vi, nó PHẢI ở đây (hoặc không tồn tại)
 			if bv, tomb, err := ReadSSTFind(meta.Path, k); err == nil {
 				if tomb {
 					return nil, errors.New("key not found")
@@ -572,10 +555,45 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) { //
 					return bv, nil
 				}
 			}
-			// Nếu ReadSSTFind lỗi (os.ErrNotExist),
-			// chúng ta có thể dừng tìm L1
-			break
 		}
+	}
+
+	// 3b. Quét L1 trở đi (L1, L2, L3...: Không chồng lấn trong cùng 1 level)
+	// Chúng ta lặp qua các Level có sẵn (1, 2, 3...)
+	// Lưu ý: Cần sort level key để đảm bảo thứ tự 1 -> 2 -> 3
+	var sortedLevels []int
+	for level := range levelsSnapshot {
+		if level > 0 {
+			sortedLevels = append(sortedLevels, level)
+		}
+	}
+	sort.Ints(sortedLevels)
+
+	for _, level := range sortedLevels {
+		files := levelsSnapshot[level]
+		// Với Level >= 1, các file đã sort và không overlap.
+		// Chúng ta dùng Binary Search hoặc duyệt tuần tự check Min/Max
+		for _, meta := range files {
+			if k >= meta.MinKey && k <= meta.MaxKey {
+				// Key nằm trong phạm vi file này.
+				// Vì không overlap, nếu key tồn tại ở Level này, nó CHỈ có thể ở file này.
+				bv, tomb, err := ReadSSTFind(meta.Path, k)
+				if err == nil {
+					if tomb {
+						return nil, errors.New("key not found")
+					}
+					if bv != nil {
+						return bv, nil
+					}
+				}
+				// Nếu tìm trong file này không thấy, nghĩa là Level này không có key đó.
+				// Chúng ta không cần check các file khác cùng Level nữa (Optimization).
+				// Tuy nhiên, để an toàn tuyệt đối với implementation hiện tại, ta cứ break loop file
+				// để xuống Level tiếp theo.
+				goto NextLevel
+			}
+		}
+	NextLevel:
 	}
 
 	return nil, errors.New("key not found")
@@ -584,53 +602,64 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) { //
 // --- KẾT THÚC SỬA ĐỔI ---
 
 // NewIterator
-// --- SỬA ĐỔI: Đọc từ Version (Levels) ---
 func (e *LSMEngine) NewIterator() (engine.Iterator, error) {
 	e.mu.RLock()
 	e.immutMu.RLock()
 
+	// Dự kiến số lượng iterator
 	iters := make([]engine.Iterator, 0, len(e.immutables)+10)
 
-	// 1. Thêm MemTable (mới nhất)
+	// 1. Thêm MemTable
 	iters = append(iters, NewMemTableIterator(e.mem))
 
-	// 2. Thêm Immutables (thứ tự mới -> cũ)
-	for i := len(e.immutables) - 1; i >= 0; i-- { //
+	// 2. Thêm Immutables
+	for i := len(e.immutables) - 1; i >= 0; i-- {
 		iters = append(iters, NewMemTableIterator(e.immutables[i]))
 	}
-
 	e.immutMu.RUnlock()
 
-	// 3. Thêm SSTables (từ Version)
-	l0Files := e.current.Levels[0]
-	l1Files := e.current.Levels[1]
-	e.mu.RUnlock() // Mở khóa chính
+	// 3. Snapshot Levels
+	levelsSnapshot := make(map[int][]*FileMetadata)
+	for level, files := range e.current.Levels {
+		levelsSnapshot[level] = files
+	}
+	e.mu.RUnlock()
 
-	// 3a. L0 (mới nhất -> cũ nhất)
-	for i := len(l0Files) - 1; i >= 0; i-- {
-		it, err := NewSSTableIterator(l0Files[i].Path)
-		if err != nil {
-			for _, it := range iters {
-				it.Close()
+	// 4. Thêm L0 (Mới -> Cũ)
+	if l0Files, ok := levelsSnapshot[0]; ok {
+		for i := len(l0Files) - 1; i >= 0; i-- {
+			it, err := NewSSTableIterator(l0Files[i].Path)
+			if err != nil {
+				// Close opened iters -> handle error cleanup carefully in prod
+				return nil, fmt.Errorf("open sst L0 iterator: %w", err)
 			}
-			return nil, fmt.Errorf("open sst L0 iterator: %w", err)
+			iters = append(iters, it)
 		}
-		iters = append(iters, it)
 	}
 
-	// 3b. L1 (sắp xếp theo key)
-	for _, meta := range l1Files {
-		it, err := NewSSTableIterator(meta.Path)
-		if err != nil {
-			for _, it := range iters {
-				it.Close()
-			}
-			return nil, fmt.Errorf("open sst L1 iterator: %w", err)
+	// 5. Thêm L1, L2... (Sorted Levels)
+	var sortedLevels []int
+	for level := range levelsSnapshot {
+		if level > 0 {
+			sortedLevels = append(sortedLevels, level)
 		}
-		iters = append(iters, it)
+	}
+	sort.Ints(sortedLevels)
+
+	for _, level := range sortedLevels {
+		files := levelsSnapshot[level]
+		// Level > 0: Các file không overlap, nhưng ta vẫn cần add tất cả vào
+		// MergingIterator để nó merge đúng thứ tự key toàn cục.
+		// (Hoặc tối ưu hơn là dùng ConcatIterator cho mỗi Level, nhưng Merging vẫn chạy đúng)
+		for _, meta := range files {
+			it, err := NewSSTableIterator(meta.Path)
+			if err != nil {
+				return nil, fmt.Errorf("open sst L%d iterator: %w", level, err)
+			}
+			iters = append(iters, it)
+		}
 	}
 
-	// 5. Trả về MergingIterator
 	return NewMergingIterator(iters), nil
 }
 

@@ -35,6 +35,8 @@ func (e *LSMEngine) runL0Compaction(l0Files []*FileMetadata) error {
 	mergedIter := NewMergingIterator(iters)
 	defer mergedIter.Close()
 
+	estimatedKeys := calculateTotalKeys(l0Files)
+
 	// 2. Tạo SSTable L1 mới
 	e.mu.Lock()
 	seq := e.seq
@@ -42,7 +44,7 @@ func (e *LSMEngine) runL0Compaction(l0Files []*FileMetadata) error {
 	e.mu.Unlock()
 
 	path := filepath.Join(e.sstDir, fmt.Sprintf("sst-L1-%06d.sst", seq))
-	writer, err := NewSSTWriter(path, 0) // Kích thước không xác định
+	writer, err := NewSSTWriter(path, estimatedKeys)
 	if err != nil {
 		return err
 	}
@@ -172,6 +174,8 @@ func (e *LSMEngine) runL1Compaction(l1Files, l2Files []*FileMetadata) error {
 	mergedIter := NewMergingIterator(iters)
 	defer mergedIter.Close()
 
+	estimatedKeys := calculateTotalKeys(filesToCompactL1, filesToCompactL2)
+
 	// 4. Tạo file SSTable L2 mới
 	e.mu.Lock()
 	seq := e.seq
@@ -179,7 +183,7 @@ func (e *LSMEngine) runL1Compaction(l1Files, l2Files []*FileMetadata) error {
 	e.mu.Unlock()
 
 	path := filepath.Join(e.sstDir, fmt.Sprintf("sst-L2-%06d.sst", seq))
-	writer, err := NewSSTWriter(path, 0) // Kích thước không xác định
+	writer, err := NewSSTWriter(path, estimatedKeys)
 	if err != nil {
 		return err
 	}
@@ -257,4 +261,15 @@ func (e *LSMEngine) runL1Compaction(l1Files, l2Files []*FileMetadata) error {
 
 	e.metrics.compacts.Add(1)
 	return nil
+}
+
+func calculateTotalKeys(files ...[]*FileMetadata) uint32 {
+	var total uint32
+	for _, fileList := range files {
+		for _, meta := range fileList {
+			total += meta.KeyCount
+		}
+	}
+	// Thêm buffer khoảng 10% để an toàn cho Bloom Filter (giảm tỉ lệ va chạm)
+	return uint32(float64(total) * 1.1)
 }
