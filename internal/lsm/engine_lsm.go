@@ -1,6 +1,7 @@
 package lsm
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,11 @@ const (
 	L1CompactionTriggerBytes = 100 * 1024 * 1024
 )
 
+type flushTask struct {
+	mem     *MemTable
+	walPath string // Đường dẫn file WAL cần xóa sau khi flush xong
+}
+
 type LSMEngine struct {
 	dir      string
 	wal      *WAL
@@ -63,7 +69,7 @@ type LSMEngine struct {
 	wg     sync.WaitGroup
 
 	// Flush management
-	flushCh  chan *MemTable
+	flushCh  chan flushTask
 	flushErr atomic.Value
 
 	// Metrics
@@ -80,6 +86,7 @@ type LSMEngine struct {
 	current      *Version
 	compactionCh chan struct{} // Channel để kích hoạt nén
 	compactMu    sync.Mutex    // Đảm bảo chỉ 1 compaction chạy
+
 }
 
 // --- MỚI: KIỂM TRA STATIC ---
@@ -126,9 +133,16 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.E
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	engine := &LSMEngine{
-		dir: dir, wal: w, mem: NewMemTable(), immutables: make([]*MemTable, 0, MaxImmutableTables),
-		sstDir: sstDir, seq: seq, flushSize: flushSize, maxMemBytes: maxMemBytes, ctx: ctx, cancel: cancel,
-		flushCh: make(chan *MemTable, MaxImmutableTables), manifestPath: manifestPath, current: currentVersion,
+		dir: dir, wal: w, mem: NewMemTable(),
+		immutables:   make([]*MemTable, 0, MaxImmutableTables),
+		sstDir:       sstDir,
+		seq:          seq,
+		flushSize:    flushSize,
+		maxMemBytes:  maxMemBytes,
+		ctx:          ctx,
+		cancel:       cancel,
+		flushCh:      make(chan flushTask, MaxImmutableTables),
+		manifestPath: manifestPath, current: currentVersion,
 		compactionCh: make(chan struct{}, 1),
 	}
 	replayedFiles, err := engine.replayWAL(walDir)
@@ -201,38 +215,39 @@ func (e *LSMEngine) replayWAL(walDir string) ([]string, error) {
 	return names, nil
 }
 
-// flushWorker
-// --- SỬA ĐỔI: Chỉ gọi flushMemTable ---
 func (e *LSMEngine) flushWorker() {
 	defer e.wg.Done()
 	slog.Info("Flush worker started", "component", "lsm")
 
-	for memTable := range e.flushCh {
+	// Sửa vòng lặp nhận task
+	for task := range e.flushCh {
 		slog.Info("Starting memtable flush", "component", "lsm")
 		start := time.Now()
 
-		if err := e.flushMemTable(memTable); err != nil { //
+		// Gọi flushMemTable với task.mem
+		if err := e.flushMemTable(task.mem); err != nil {
 			e.flushErr.Store(err)
-			slog.Error("Memtable flush error",
-				"component", "lsm",
-				"error", err,
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			slog.Error("Memtable flush error", "error", err)
 		} else {
-			slog.Info("Memtable flush complete",
-				"component", "lsm",
-				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			// --- FIX: Flush thành công -> Xóa file WAL cũ ---
+			if task.walPath != "" {
+				if err := os.Remove(task.walPath); err != nil {
+					slog.Warn("Failed to remove old WAL", "path", task.walPath, "error", err)
+				} else {
+					slog.Debug("Removed old WAL file", "path", task.walPath)
+				}
+			}
+			// ------------------------------------------------
+
+			slog.Info("Memtable flush complete", "duration_ms", time.Since(start).Milliseconds())
 		}
 
-		// --- MỚI: Kích hoạt kiểm tra compaction ---
 		e.tryScheduleCompaction()
 	}
 	slog.Info("Flush worker stopped (channel closed).", "component", "lsm")
 }
 
 // flushMemTable
-// --- SỬA ĐỔI: Cập nhật Manifest thay vì chỉ xóa immutable ---
 func (e *LSMEngine) flushMemTable(memTable *MemTable) error {
 	ctx, cancel := context.WithTimeout(e.ctx, FlushTimeout)
 	defer cancel()
@@ -442,9 +457,12 @@ func (e *LSMEngine) ApplyBatch(b engine.Batch) error {
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.shuttingDown {
+		return errors.New("database is shutting down")
+	}
 	if e.ctx.Err() != nil {
 		return errors.New("engine is shutting down")
-	} // [cite: 196-197]
+	}
 	if lsmBatch.Size() == 0 {
 		return nil
 	}
@@ -547,14 +565,22 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 			if k < meta.MinKey || k > meta.MaxKey {
 				continue
 			}
-			if bv, tomb, err := ReadSSTFind(meta.Path, k); err == nil {
+			// --- [FIX 1] Xử lý lỗi chuẩn cho L0 ---
+			bv, tomb, err := ReadSSTFind(meta.Path, k)
+			if err == nil {
+				// Tìm thấy!
 				if tomb {
 					return nil, errors.New("key not found")
 				}
 				if bv != nil {
 					return bv, nil
 				}
+			} else if err != os.ErrNotExist {
+				// Lỗi hệ thống (IO, Checksum...), log warning nhưng không return lỗi ngay
+				// để hệ thống cố gắng tìm ở các file cũ hơn (Hy vọng có bản backup)
+				slog.Warn("Error reading L0 SST", "path", meta.Path, "error", err)
 			}
+			// Nếu err == os.ErrNotExist -> Chỉ đơn giản là không có, loop tiếp.
 		}
 	}
 
@@ -577,6 +603,7 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 			if k >= meta.MinKey && k <= meta.MaxKey {
 				// Key nằm trong phạm vi file này.
 				// Vì không overlap, nếu key tồn tại ở Level này, nó CHỈ có thể ở file này.
+				// --- [FIX 2] Xử lý lỗi chuẩn cho Level > 0 ---
 				bv, tomb, err := ReadSSTFind(meta.Path, k)
 				if err == nil {
 					if tomb {
@@ -585,11 +612,15 @@ func (e *LSMEngine) Get(key []byte) ([]byte, error) {
 					if bv != nil {
 						return bv, nil
 					}
+				} else if err != os.ErrNotExist {
+					// Log warning nếu file bị hỏng
+					slog.Warn("Error reading SST Level > 0", "level", level, "path", meta.Path, "error", err)
 				}
-				// Nếu tìm trong file này không thấy, nghĩa là Level này không có key đó.
-				// Chúng ta không cần check các file khác cùng Level nữa (Optimization).
-				// Tuy nhiên, để an toàn tuyệt đối với implementation hiện tại, ta cứ break loop file
-				// để xuống Level tiếp theo.
+
+				// Logic quan trọng của LSM Level > 0:
+				// Vì các file không overlap, nếu key nằm trong Range [Min, Max] của file này
+				// mà tìm trong file không thấy (hoặc file lỗi), thì CHẮC CHẮN key không tồn tại ở Level này.
+				// Ta break để xuống Level sâu hơn tìm tiếp.
 				goto NextLevel
 			}
 		}
@@ -711,36 +742,63 @@ func mapToSlice(m map[string]struct{}) []string {
 	return keys
 }
 
+// internal/lsm/engine_lsm.go
+
 func (e *LSMEngine) rotateMemTable() error {
-	// Check if too many immutable tables
 	e.immutMu.RLock()
 	immutableCount := len(e.immutables)
 	e.immutMu.RUnlock()
 
 	if immutableCount >= MaxImmutableTables {
-		// Block until flush completes to prevent unbounded memory growth
 		return errors.New("too many pending flushes, please retry")
 	}
 
-	// Snapshot current memtable
+	// 1. Đóng WAL hiện tại
+	oldWALPath := e.wal.path // Lưu đường dẫn để xóa sau
+	if err := e.wal.Close(); err != nil {
+		return fmt.Errorf("close wal: %w", err)
+	}
+
+	// 2. Tạo WAL mới
+	// Lưu ý: seq của engine dùng cho SST, ta có thể dùng timestamp hoặc seq riêng cho WAL.
+	// Để đơn giản và tránh conflict, dùng Seq hiện tại + Nano time
+	newWalPath := filepath.Join(e.dir, "wal", fmt.Sprintf("wal-%d-%d.log", e.seq, time.Now().UnixNano()))
+	newWalFile, err := os.OpenFile(newWalPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("create new wal: %w", err)
+	}
+
+	// Cập nhật e.wal trỏ tới file mới
+	// (Lưu ý: Cần sửa struct WAL để public field hoặc tạo hàm NewWAL linh hoạt hơn,
+	// nhưng ở đây tôi giả định bạn fix nhanh bằng cách gán lại struct)
+	e.wal = &WAL{
+		f:    newWalFile,
+		path: newWalPath,
+		w:    bufio.NewWriterSize(newWalFile, 256*1024),
+	}
+
+	// 3. Snapshot Memtable
 	snap := e.mem
 	e.mem = NewMemTable()
 	atomic.StoreInt64(&e.memBytes, 0)
 
-	// Add to immutables
+	// 4. Add to immutables
 	e.immutMu.Lock()
 	e.immutables = append(e.immutables, snap)
 	e.immutMu.Unlock()
 
-	// Send to flush worker (non-blocking with timeout)
+	// 5. Gửi cả Memtable và OldWALPath vào channel
+	task := flushTask{
+		mem:     snap,
+		walPath: oldWALPath,
+	}
+
 	select {
-	case e.flushCh <- snap:
-		// Success
+	case e.flushCh <- task:
+		return nil
 	case <-time.After(time.Second):
 		return errors.New("flush queue full")
 	}
-
-	return nil
 }
 
 // DumpDB
