@@ -10,8 +10,6 @@ import (
 	"strconv"
 
 	"github.com/chzyer/readline"
-	// --- SỬA ĐỔI: Import cả hai ---
-
 	"github.com/nconghau/MiniDBGo/internal/lsm"
 )
 
@@ -25,7 +23,7 @@ func main() {
 
 	// Set memory limit (optional but recommended)
 	if memLimit := os.Getenv("GOMEMLIMIT"); memLimit != "" {
-		slog.Info("GOMEMLIMIT set", "value", memLimit)
+		slog.Info("Main set", "value", memLimit)
 	}
 
 	// Set GOGC for better memory management
@@ -54,9 +52,13 @@ func main() {
 		}
 	}
 
-	// --- SỬA ĐỔI: Gọi lsm.OpenLSMWithConfig và gán cho engine.Engine ---
 	// Đây là nơi chúng ta kết nối implementation và interface
-	db, err := lsm.OpenLSMWithConfig("data/MiniDBGo", flushSize, maxMemBytes)
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "data/MiniDBGo" // Giá trị mặc định (cho chạy local không docker)
+	}
+	slog.Info("Opening database", "path", dbPath)
+	db, err := lsm.OpenLSMWithConfig(dbPath, flushSize, maxMemBytes)
 	if err != nil {
 		slog.Error("Failed to open database", "error", err)
 		os.Exit(1)

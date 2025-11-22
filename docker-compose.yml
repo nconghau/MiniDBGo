@@ -13,6 +13,7 @@ services:
       - ./data:/data
     environment:
       - MODE=server
+      - DB_PATH=/data/MiniDBGo
       - GOMEMLIMIT=128MiB    # Crucial: Go runtime memory limit 
       - MAX_MEM_MB=2        # Smaller memtable 
       - FLUSH_SIZE=10000      # Flush more frequently 
@@ -22,10 +23,10 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M     # Hard limit for the container
+          memory: 512M
         reservations:
           cpus: "0.5"
-          memory: 128M     # Reserve this amount
+          memory: 256M   
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6866/api/health"]
       interval: 30s     

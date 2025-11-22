@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -100,7 +101,6 @@ func OpenLSM(dir string) (engine.Engine, error) {
 
 // --- SỬA ĐỔI: Kiểu trả về là engine.Engine ---
 func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.Engine, error) {
-	// ... (logic [cite: 187-193] gốc giữ nguyên) ...
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create dir: %w", err)
 	}
@@ -117,6 +117,15 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.E
 	if err != nil {
 		return nil, fmt.Errorf("load manifest: %w", err)
 	}
+	// Tự động sửa lại đường dẫn file trong Manifest để khớp với thư mục hiện tại
+	// Điều này giúp DB hoạt động đúng ngay cả khi di chuyển thư mục dữ liệu (như Docker Volume)
+	for _, files := range currentVersion.Levels {
+		for _, f := range files {
+			// Chỉ lấy tên file (vd: sst-L0-00001.sst) và ghép với sstDir mới
+			f.Path = filepath.Join(sstDir, filepath.Base(f.Path))
+		}
+	}
+
 	seq := 1
 	for _, files := range currentVersion.Levels {
 		for _, f := range files {
@@ -127,6 +136,7 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.E
 			}
 		}
 	}
+
 	w, err := OpenWAL(walDir, seq)
 	if err != nil {
 		return nil, fmt.Errorf("open wal: %w", err)
@@ -168,7 +178,6 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.E
 		// --- BẮT ĐẦU MÃ MỚI ---
 		// SAU KHI FLUSH, ĐÁNH THỨC COMPACTION WORKER ĐỂ NÓ KIỂM TRA
 		engine.tryScheduleCompaction()
-		// --- KẾT THÚC MÃ MỚI ---
 	}
 	engine.wg.Add(2)
 	go engine.flushWorker()
@@ -176,8 +185,7 @@ func OpenLSMWithConfig(dir string, flushSize int64, maxMemBytes int64) (engine.E
 	return engine, nil
 }
 
-// (replayWAL, flushWorker, flushMemTable, removeImmutable... giữ nguyên như cũ)
-// ... (Bỏ qua các hàm không thay đổi để tiết kiệm không gian) ...
+// Starting database
 func (e *LSMEngine) replayWAL(walDir string) ([]string, error) {
 	walFiles, err := os.ReadDir(walDir)
 	if err != nil {
@@ -186,30 +194,58 @@ func (e *LSMEngine) replayWAL(walDir string) ([]string, error) {
 
 	names := make([]string, 0)
 	for _, f := range walFiles {
+		// Chỉ lấy đúng định dạng wal-*.log
 		if strings.HasPrefix(f.Name(), "wal-") && strings.HasSuffix(f.Name(), ".log") {
 			names = append(names, filepath.Join(walDir, f.Name()))
 		}
 	}
+	// Sắp xếp để replay theo thứ tự thời gian
 	sort.Strings(names)
+
+	slog.Info("Replaying WAL files...", "count", len(names))
 
 	for _, p := range names {
 		tmpF, err := os.Open(p)
 		if err != nil {
+			slog.Warn("Cannot open WAL file for replay", "path", p, "error", err)
 			continue
 		}
 
 		wr := &WAL{f: tmpF, path: p}
-		_ = wr.Iterate(func(flags byte, key, value []byte) error {
-			k := string(key) // [cite: 149]
+		err = wr.Iterate(func(flags byte, key, value []byte) error {
+			k := string(key)
+
+			// 1. Ghi vào Memtable
 			if flags == 1 {
 				e.mem.Delete(k)
 			} else {
 				e.mem.Put(k, value)
-				atomic.AddInt64(&e.memBytes, int64(len(key)+len(value)))
+			}
+
+			// 2. [QUAN TRỌNG] Kiểm tra Memory Limit ngay trong lúc Replay
+			// Nếu vượt ngưỡng -> Flush ngay để giải phóng RAM
+			if e.mem.Size() >= int64(e.flushSize) || e.mem.ByteSize() >= e.maxMemBytes {
+				slog.Info("MemTable full during replay, flushing...", "size", e.mem.ByteSize())
+
+				// Flush đồng bộ (Sync) trực tiếp
+				if err := e.flushMemTable(e.mem); err != nil {
+					return fmt.Errorf("flush error during replay: %w", err)
+				}
+
+				// Reset MemTable mới sau khi flush
+				e.mem = NewMemTable()
+				atomic.StoreInt64(&e.memBytes, 0)
+
+				// Gọi GC thủ công để trả RAM cho OS ngay lập tức (tránh OOM trong Docker chật hẹp)
+				runtime.GC()
 			}
 			return nil
 		})
+
 		tmpF.Close()
+		if err != nil {
+			return nil, fmt.Errorf("error iterating wal %s: %w", p, err)
+		}
 	}
 
 	return names, nil
